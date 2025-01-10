@@ -1,0 +1,35 @@
+# Cursor Rules and Notes
+
+## shadcn/ui Installation
+The command to initialize shadcn/ui has changed from `npx shadcn-ui@latest init` to `npx shadcn@latest init`.
+This change should be noted when following any shadcn/ui tutorials or documentation that reference the old command.
+
+## Next.js Dynamic Params
+As of Next.js 14.1, dynamic route parameters (`params` and `searchParams`) must be awaited before use.
+Example:
+```typescript
+// Old way (no longer works)
+export default function Page({ params }) {
+  const { slug } = params;
+  // ...
+}
+
+// New way (required)
+export default async function Page({ params }) {
+  const { slug } = await params;
+  // ...
+}
+```
+
+## Schema Documentation
+When making changes to the database schema:
+1. Always update `src/utils/supabase/schema.md` to reflect any changes
+2. Keep SQL snippets in the documentation in sync with `src/utils/supabase/schema.sql`
+3. Document all changes including:
+   - Table structure changes
+   - New or modified indexes
+   - RLS policy changes
+   - Triggers or functions
+   - Constraints and relationships
+4. Include explanations for why changes were made
+5. Keep the documentation organized by feature/table 
