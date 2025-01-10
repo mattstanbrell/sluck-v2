@@ -9,7 +9,7 @@ export default function AuthPage() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${location.origin}/auth/callback`
+        redirectTo: `https://sluck.vercel.app/auth/callback`
       }
     })
     
