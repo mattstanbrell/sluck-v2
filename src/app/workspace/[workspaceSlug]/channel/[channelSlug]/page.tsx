@@ -1,5 +1,6 @@
 import { createClient } from '@/utils/supabase/server'
 import { notFound } from 'next/navigation'
+import { MessageContainer } from '@/components/messages/MessageContainer'
 
 export default async function ChannelPage({
   params
@@ -45,21 +46,8 @@ export default async function ChannelPage({
         )}
       </div>
 
-      {/* Message List */}
-      <div className="flex-1 overflow-auto p-4">
-        {/* Messages will go here */}
-      </div>
-
-      {/* Message Input */}
-      <div className="border-t border-border p-4">
-        <div className="bg-accent/50 rounded-lg p-2">
-          <input
-            type="text"
-            placeholder={`Message #${channel.name}`}
-            className="bg-transparent w-full focus:outline-none"
-          />
-        </div>
-      </div>
+      {/* Messages */}
+      <MessageContainer channelId={channel.id} />
     </div>
   )
 } 

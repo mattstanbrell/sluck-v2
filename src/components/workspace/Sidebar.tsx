@@ -5,7 +5,9 @@ import { Button } from '@/components/ui/button'
 import { createClient } from '@/utils/supabase/client'
 import { useEffect, useState } from 'react'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
+import Link from 'next/link'
+import { CreateChannelDialog } from './CreateChannelDialog'
 
 interface WorkspaceData {
   name: string
@@ -30,6 +32,7 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const supabase = createClient()
   const router = useRouter()
+  const pathname = usePathname()
 
   useEffect(() => {
     async function loadData() {
@@ -49,6 +52,7 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
         .from('channels')
         .select('id, name, slug')
         .eq('workspace_id', workspaceId)
+        .order('name')
 
       // Load user profile
       const { data: profile } = await supabase
@@ -56,13 +60,39 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
         .select('full_name, display_name, avatar_url')
         .eq('id', user.id)
         .single()
-
-      console.log('Profile data:', profile)
-      console.log('Avatar URL:', profile?.avatar_url)
       
       setWorkspace(workspace)
       setChannels(channels || [])
       setProfile(profile)
+
+      // Subscribe to channel changes
+      const channelSubscription = supabase
+        .channel('channel-changes')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'channels',
+            filter: `workspace_id=eq.${workspaceId}`
+          },
+          async (payload) => {
+            // Reload channels to get fresh data
+            const { data: updatedChannels } = await supabase
+              .from('channels')
+              .select('id, name, slug')
+              .eq('workspace_id', workspaceId)
+              .order('name')
+            
+            setChannels(updatedChannels || [])
+          }
+        )
+        .subscribe()
+
+      // Cleanup subscription
+      return () => {
+        channelSubscription.unsubscribe()
+      }
     }
     
     loadData()
@@ -94,21 +124,30 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
       <div className="flex-1 p-4 space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="font-medium text-sm text-custom-text-secondary">Channels</h2>
-          <Button variant="ghost" size="icon" className="w-4 h-4 text-custom-text-secondary hover:text-custom-text hover:bg-custom-ui-faint">
-            <span className="text-xs">+</span>
-          </Button>
+          <CreateChannelDialog workspaceId={workspaceId} />
         </div>
         <nav className="space-y-1">
-          {channels.map(channel => (
-            <a
-              key={channel.id}
-              href={`/workspace/${workspace?.slug}/channel/${channel.slug}`}
-              className="flex items-center px-2 py-1 text-sm rounded-md hover:bg-custom-ui-faint group"
-            >
-              <span className="text-custom-text-tertiary group-hover:text-custom-text-secondary">#</span>
-              <span className="ml-2 text-custom-text-secondary group-hover:text-custom-text">{channel.name}</span>
-            </a>
-          ))}
+          {channels.map(channel => {
+            const channelUrl = `/workspace/${workspace?.slug}/channel/${channel.slug}`
+            const isActive = pathname === channelUrl
+            
+            return (
+              <Link
+                key={channel.id}
+                href={channelUrl}
+                className={`flex items-center px-2 py-1 text-sm rounded-md hover:bg-custom-ui-faint group ${
+                  isActive ? 'bg-custom-ui-faint' : ''
+                }`}
+              >
+                <span className={`text-custom-text-tertiary group-hover:text-custom-text-secondary ${
+                  isActive ? 'text-custom-text-secondary' : ''
+                }`}>#</span>
+                <span className={`ml-2 text-custom-text-secondary group-hover:text-custom-text ${
+                  isActive ? 'text-custom-text' : ''
+                }`}>{channel.name}</span>
+              </Link>
+            )
+          })}
         </nav>
 
         {/* Direct Messages Section */}
