@@ -1,10 +1,8 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import { createClient } from '@/utils/supabase/client'
 
 export default function AuthPage() {
-  const router = useRouter()
   const supabase = createClient()
 
   const handleSignIn = async () => {

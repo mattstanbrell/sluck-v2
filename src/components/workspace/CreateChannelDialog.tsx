@@ -50,10 +50,10 @@ export function CreateChannelDialog({ workspaceId, trigger }: CreateChannelDialo
       setOpen(false)
       setChannelName("")
       setDescription("")
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message || "Failed to create channel",
+        description: error instanceof Error ? error.message : "Failed to create channel",
         variant: "destructive",
       })
     } finally {
@@ -74,7 +74,7 @@ export function CreateChannelDialog({ workspaceId, trigger }: CreateChannelDialo
         <DialogHeader>
           <DialogTitle className="text-custom-text">Create a channel</DialogTitle>
           <DialogDescription className="text-custom-text-secondary">
-            Channels are where your team communicates. They're best when organized around a topic.
+            Channels are where your team communicates. They&apos;re best when organized around a topic.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
@@ -101,7 +101,7 @@ export function CreateChannelDialog({ workspaceId, trigger }: CreateChannelDialo
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 className="bg-custom-ui-faint border-custom-ui-medium resize-none"
-                placeholder="What's this channel about?"
+                placeholder="What&apos;s this channel about?"
                 rows={3}
                 disabled={isLoading}
               />

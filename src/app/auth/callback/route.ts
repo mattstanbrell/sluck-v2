@@ -12,7 +12,7 @@ export async function GET(request: Request) {
     
     if (!error) {
       // Get the authenticated user
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      const { data: { user } } = await supabase.auth.getUser();
 
       if (user) {
         // Insert or update user in the users table

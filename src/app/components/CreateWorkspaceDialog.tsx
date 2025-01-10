@@ -44,10 +44,10 @@ export function CreateWorkspaceDialog() {
       })
       setOpen(false)
       router.push(`/workspace/${workspace.slug}`)
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message || "Failed to create workspace",
+        description: error instanceof Error ? error.message : "Failed to create workspace",
         variant: "destructive",
       })
     } finally {

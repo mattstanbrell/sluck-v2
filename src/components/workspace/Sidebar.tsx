@@ -76,7 +76,7 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
             table: 'channels',
             filter: `workspace_id=eq.${workspaceId}`
           },
-          async (payload) => {
+          async () => {
             // Reload channels to get fresh data
             const { data: updatedChannels } = await supabase
               .from('channels')
@@ -96,7 +96,7 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
     }
     
     loadData()
-  }, [workspaceId])
+  }, [workspaceId, supabase])
 
   // Get display name in order of preference: display_name -> full_name -> 'User'
   const displayName = profile?.display_name || profile?.full_name || 'User'
