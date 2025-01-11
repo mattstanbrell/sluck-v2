@@ -1,7 +1,7 @@
 import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
-import { CreateWorkspaceDialog } from './components/CreateWorkspaceDialog'
-import { JoinWorkspaceForm } from './components/JoinWorkspaceForm'
+import { CreateWorkspaceDialog } from '@/components/workspace/CreateWorkspaceDialog'
+import { JoinWorkspaceForm } from '@/components/workspace/JoinWorkspaceForm'
 
 type WorkspaceMembership = {
   workspace_id: string
