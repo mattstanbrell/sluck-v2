@@ -34,9 +34,9 @@ export default async function ChannelPage({
   }
 
   return (
-    <div className="flex-1 flex flex-col">
+    <div className="flex flex-col h-full">
       {/* Channel Header */}
-      <div className="border-b border-border p-4">
+      <div className="shrink-0 border-b border-border p-4">
         <div className="flex items-center">
           <span className="text-muted-foreground">#</span>
           <h1 className="font-semibold ml-2">{channel.name}</h1>
@@ -47,7 +47,9 @@ export default async function ChannelPage({
       </div>
 
       {/* Messages */}
-      <MessageContainer channelId={channel.id} />
+      <div className="flex-1 min-h-0">
+        <MessageContainer channelId={channel.id} />
+      </div>
     </div>
   )
 } 

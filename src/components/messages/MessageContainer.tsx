@@ -11,11 +11,13 @@ export function MessageContainer({
   conversationId?: string
 }) {
   return (
-    <div className="flex flex-col h-full bg-[#FFFCF0]">
+    <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto min-h-0">
         <MessageList channelId={channelId} conversationId={conversationId} />
       </div>
-      <MessageInput channelId={channelId} conversationId={conversationId} />
+      <div className="shrink-0">
+        <MessageInput channelId={channelId} conversationId={conversationId} />
+      </div>
     </div>
   )
 } 
