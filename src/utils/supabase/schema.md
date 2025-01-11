@@ -14,6 +14,8 @@ CREATE TABLE profiles (
   full_name TEXT NOT NULL,
   display_name TEXT,
   avatar_url TEXT,
+  avatar_color TEXT,
+  avatar_cache TEXT,
   last_seen TIMESTAMPTZ
 );
 
@@ -29,13 +31,15 @@ ON profiles FOR SELECT
 TO authenticated
 USING (
   EXISTS (
-    SELECT 1 FROM workspace_members wm
+    SELECT 1
+    FROM workspace_members wm
     WHERE wm.user_id = auth.uid()
-    AND EXISTS (
-      SELECT 1 FROM workspace_members wm2
-      WHERE wm2.workspace_id = wm.workspace_id
-      AND wm2.user_id = profiles.id
-    )
+      AND EXISTS (
+        SELECT 1
+        FROM workspace_members wm2
+        WHERE wm2.workspace_id = wm.workspace_id
+          AND wm2.user_id = profiles.id
+      )
   )
   OR id = auth.uid()
 );
@@ -51,11 +55,8 @@ WITH CHECK (id = auth.uid());
 - Links to Supabase's auth.users table
 - Separates display_name from full_name for flexibility
 - Tracks last_seen for presence features
-- Indexes support email lookups and presence queries
-- RLS policies ensure:
-  - Users can only read profiles of members in their workspaces
-  - Users can always read their own profile
-  - Users can only update their own profile
+- Stores avatar_color extracted from user's avatar for UI theming
+- RLS ensures only workspace peers or the user themself can view/update
 
 ### Workspaces
 
@@ -79,7 +80,7 @@ CREATE INDEX workspaces_slug_key ON workspaces(slug);
 
 - Slug field for URL-friendly workspace names
 - Invite system with expiration and revocation
-- Indexes support creator lookups and invite code validation
+- Indexes for creator lookups and invite code validation
 
 ### Workspace Members
 
@@ -96,17 +97,16 @@ CREATE INDEX workspace_members_user_id_idx ON workspace_members(user_id);
 ```
 
 - Tracks membership and roles in workspaces
-- Composite primary key prevents duplicate memberships
-- Index supports finding all workspaces for a user
+- Composite primary key prevents duplicates
+- Indexes for quick membership lookups
 
 ## Row Level Security (RLS) Policies
 
-### Current Working Policies
+### Workspace Policies
 
 ```sql
 -- Enable RLS
 ALTER TABLE workspaces ENABLE ROW LEVEL SECURITY;
-ALTER TABLE workspace_members ENABLE ROW LEVEL SECURITY;
 
 -- Allow any authenticated user to create workspaces
 CREATE POLICY "Users can create workspaces"
@@ -114,118 +114,94 @@ ON workspaces FOR INSERT
 TO authenticated
 WITH CHECK (true);
 
--- Allow users to view workspaces they created
-CREATE POLICY "Creators can view their workspaces"
-ON workspaces FOR SELECT
+-- Allow creators and members to view workspaces
+ALTER POLICY "Creators can view their workspaces"
+ON public.workspaces
 TO authenticated
-USING (created_by = auth.uid());
+USING (
+  (created_by = auth.uid())
+  OR EXISTS (
+    SELECT 1
+    FROM workspace_members wm
+    WHERE wm.workspace_id = workspaces.id
+      AND wm.user_id = auth.uid()
+  )
+);
 
--- Allow reading from workspace_members (needed for policy checks)
-CREATE POLICY "Allow selecting workspace members"
-ON workspace_members FOR SELECT
+-- Allow workspace owners and admins to update workspace settings
+CREATE POLICY "Owners and admins can update workspace settings"
+ON workspaces FOR UPDATE
 TO authenticated
-USING (true);
-
--- Allow users to add themselves as members with role conditions
-CREATE POLICY "Users can create workspace memberships"
-ON workspace_members FOR INSERT
-TO authenticated
-WITH CHECK (
-    user_id = auth.uid() AND (
-        -- Either adding self as regular member
-        role = 'member' OR
-        -- Or adding self as owner if created the workspace
-        (role = 'owner' AND EXISTS (
-            SELECT 1 FROM workspaces 
-            WHERE id = workspace_id 
-            AND created_by = auth.uid()
-        ))
-    )
+USING (
+  EXISTS (
+    SELECT 1
+    FROM workspace_members
+    WHERE workspace_id = workspaces.id
+      AND user_id = auth.uid()
+      AND role IN ('owner', 'admin')
+  )
 );
 ```
 
-These minimal policies implement:
+- Users can insert new workspaces (becoming the created_by)
+- Policy Change: "Creators can view their workspaces" is now extended so that any workspace member may also view it
 
-1. **Workspace Creation**: Any authenticated user can create workspaces
-2. **Workspace Visibility**: Users can only see workspaces they created
-3. **Membership Rules**:
-   - Users can only add themselves as members
-   - Can be added as regular 'member'
-   - Can be added as 'owner' only if they created the workspace
-4. **Policy Dependencies**:
-   - SELECT access on workspace_members is required for policy checks
-   - This allows the EXISTS check in the insert policy to work
-
-Note: These are minimal policies for workspace creation. Additional policies will be needed for:
-- Viewing workspaces as a member (not just creator)
-- Managing workspace settings
-- Updating and removing members
-- Managing invites
-- Channel operations
-
-### Workspace Members Table Policies
+### Workspace Members Policies
 
 ```sql
--- Enable RLS
 ALTER TABLE workspace_members ENABLE ROW LEVEL SECURITY;
 
--- Read Policy: Members can view other members in their workspaces
+-- Allow reading membership of a workspace you belong to
 CREATE POLICY "Members can view workspace members"
 ON workspace_members FOR SELECT
 TO authenticated
 USING (
   EXISTS (
     SELECT 1
-    FROM workspace_members members
-    WHERE members.workspace_id = workspace_id
-    AND members.user_id = auth.uid()
+    FROM workspace_members wm
+    WHERE wm.workspace_id = workspace_members.workspace_id
+      AND wm.user_id = auth.uid()
   )
 );
 
--- Initial Owner Policy: Allow workspace creators to set themselves as owners
+-- Initial owner policy: user can set themselves as owner if they created the workspace
 CREATE POLICY "Initial owner can be set"
 ON workspace_members FOR INSERT
 TO authenticated
 WITH CHECK (
-  user_id = auth.uid() AND
-  EXISTS (
+  user_id = auth.uid()
+  AND EXISTS (
     SELECT 1
     FROM workspaces
     WHERE id = workspace_id
-    AND created_by = auth.uid()
+      AND created_by = auth.uid()
   )
 );
 
--- Management Policy: Owners and admins can update member details
+-- Owners and admins can update members
 CREATE POLICY "Owners and admins can manage members"
 ON workspace_members FOR UPDATE
 TO authenticated
 USING (
   EXISTS (
-    SELECT 1 
-    FROM workspace_members members
-    WHERE members.workspace_id = workspace_id
-    AND members.user_id = auth.uid()
-    AND members.role IN ('owner', 'admin')
+    SELECT 1
+    FROM workspace_members wm
+    WHERE wm.workspace_id = workspace_members.workspace_id
+      AND wm.user_id = auth.uid()
+      AND wm.role IN ('owner', 'admin')
   )
 );
 ```
 
-These policies implement the following security rules:
+### REVOKE Direct INSERT on workspace_members
 
-1. **Workspace Creation**
-   - Users can only create workspaces where they are marked as the creator
-   - Initial owner creation is tied to workspace creation
+Since we now manage membership via admin actions or via our new security-definer function, we explicitly revoke direct inserts by normal users:
 
-2. **Workspace Access**
-   - Only members can view workspaces they belong to
-   - Owners and admins can update workspace details
-   - Only owners can delete workspaces
+```sql
+REVOKE INSERT ON workspace_members FROM authenticated;
+```
 
-3. **Member Management**
-   - Members can view other members in their workspaces
-   - Only workspace creators can set initial ownership
-   - Owners and admins can update existing members
+This ensures that only owners/admins (by policy) or a special function can add new members.
 
 ### Channels
 
@@ -247,11 +223,6 @@ CREATE INDEX channels_created_by_idx ON channels(created_by);
 CREATE INDEX channels_slug_idx ON channels(workspace_id, slug);
 ```
 
-- Belongs to a workspace
-- Tracks channel creation metadata
-- Enforces unique channel names within each workspace
-- Indexes support workspace channel listing and creator lookups
-
 ### Channel Members
 
 ```sql
@@ -267,11 +238,7 @@ CREATE TABLE channel_members (
 CREATE INDEX channel_members_user_id_idx ON channel_members(user_id);
 ```
 
-- Tracks channel membership and roles
-- last_read_at enables unread message tracking
-- Index supports finding all channels for a user
-
-### Conversations (Direct Messages)
+### Conversations (DMs)
 
 ```sql
 CREATE TABLE conversations (
@@ -283,10 +250,6 @@ CREATE TABLE conversations (
 
 CREATE INDEX conversations_workspace_id_idx ON conversations(workspace_id);
 ```
-
-- Supports both direct (2 people) and group messages
-- Belongs to a workspace
-- Index supports workspace conversation listing
 
 ### Conversation Participants
 
@@ -301,10 +264,6 @@ CREATE TABLE conversation_participants (
 
 CREATE INDEX conversation_participants_user_id_idx ON conversation_participants(user_id);
 ```
-
-- Tracks conversation participants
-- last_read_at enables unread message tracking
-- Index supports finding all conversations for a user
 
 ### Messages
 
@@ -332,101 +291,134 @@ CREATE INDEX messages_latest_channel_idx ON messages(channel_id, created_at DESC
 CREATE INDEX messages_latest_conversation_idx ON messages(conversation_id, created_at DESC);
 ```
 
-- Unified messages table for both channels and conversations
-- Threading support via parent_id
-- CHECK constraint ensures message belongs to exactly one container
-- Comprehensive indexes support various query patterns
-
-These policies implement:
+### Messages RLS
 
 ```sql
--- Messages RLS policies
+ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
+
 CREATE POLICY "Users can read messages in their channels"
 ON messages FOR SELECT
+TO authenticated
 USING (
   (channel_id IN (
-    SELECT channel_id FROM channel_members 
+    SELECT channel_id
+    FROM channel_members
     WHERE user_id = auth.uid()
   ))
   OR
   (conversation_id IN (
-    SELECT conversation_id FROM conversation_participants 
+    SELECT conversation_id
+    FROM conversation_participants
     WHERE user_id = auth.uid()
   ))
 );
 
 CREATE POLICY "Users can insert messages"
 ON messages FOR INSERT
+TO authenticated
 WITH CHECK (
-  auth.uid() = user_id AND
-  (
+  auth.uid() = user_id
+  AND (
     -- For channel messages
-    (channel_id IS NOT NULL AND
-     EXISTS (
-       SELECT 1 FROM channel_members
-       WHERE channel_id = messages.channel_id
-       AND user_id = auth.uid()
-     ))
+    (
+      channel_id IS NOT NULL
+      AND EXISTS (
+        SELECT 1
+        FROM channel_members
+        WHERE channel_id = messages.channel_id
+          AND user_id = auth.uid()
+      )
+    )
     OR
     -- For conversation messages
-    (conversation_id IS NOT NULL AND
-     EXISTS (
-       SELECT 1 FROM conversation_participants
-       WHERE conversation_id = messages.conversation_id
-       AND user_id = auth.uid()
-     ))
+    (
+      conversation_id IS NOT NULL
+      AND EXISTS (
+        SELECT 1
+        FROM conversation_participants
+        WHERE conversation_id = messages.conversation_id
+          AND user_id = auth.uid()
+      )
+    )
   )
 );
 
 CREATE POLICY "Users can update their own messages"
 ON messages FOR UPDATE
+TO authenticated
 USING (auth.uid() = user_id)
 WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Users can delete their own messages"
 ON messages FOR DELETE
+TO authenticated
 USING (auth.uid() = user_id);
 ```
 
-These policies ensure:
-- Users can only read messages in channels/conversations they're members of
-- Users can only send messages to channels/conversations they're members of
-- Users can only edit/delete their own messages
-- Message ownership is enforced through user_id field
+## Functions and Triggers
 
-## Functions
+### 1) Automatic Workspace Owner Assignment
 
-### Conversation Rules
+```sql
+-- Function to add workspace creator as owner
+CREATE OR REPLACE FUNCTION add_creator_as_workspace_owner()
+RETURNS TRIGGER
+SECURITY DEFINER
+SET search_path = public
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  INSERT INTO workspace_members (workspace_id, user_id, role)
+  VALUES (NEW.id, NEW.created_by, 'owner');
+
+  RETURN NEW;
+END;
+$$;
+
+-- Trigger to automatically add creator as owner
+CREATE TRIGGER workspace_creator_trigger
+AFTER INSERT ON workspaces
+FOR EACH ROW
+EXECUTE FUNCTION add_creator_as_workspace_owner();
+```
+
+### 2) Enforce Conversation Rules
 
 ```sql
 CREATE OR REPLACE FUNCTION enforce_conversation_rules()
 RETURNS TRIGGER AS $$
 BEGIN
-  -- For direct messages
   IF (SELECT type FROM conversations WHERE id = NEW.conversation_id) = 'direct' THEN
-    -- Check if this would exceed 2 participants
+    -- Only 2 participants in a direct conversation
     IF (
-      SELECT COUNT(*) FROM conversation_participants 
+      SELECT COUNT(*)
+      FROM conversation_participants
       WHERE conversation_id = NEW.conversation_id
     ) >= 2 THEN
       RAISE EXCEPTION 'Direct messages can only have 2 participants';
     END IF;
 
-    -- Check if DM already exists between these users
+    -- Prevent duplicate direct conversations between the same users
     IF EXISTS (
-      SELECT 1 FROM conversations c
+      SELECT 1
+      FROM conversations c
       JOIN conversation_participants cp1 ON cp1.conversation_id = c.id
       JOIN conversation_participants cp2 ON cp2.conversation_id = c.id
-      WHERE c.workspace_id = (SELECT workspace_id FROM conversations WHERE id = NEW.conversation_id)
+      WHERE c.workspace_id = (
+        SELECT workspace_id
+        FROM conversations
+        WHERE id = NEW.conversation_id
+      )
       AND c.type = 'direct'
       AND cp1.user_id = NEW.user_id
       AND cp2.user_id IN (
-        SELECT user_id FROM conversation_participants 
+        SELECT user_id
+        FROM conversation_participants
         WHERE conversation_id = NEW.conversation_id
       )
       AND c.id != NEW.conversation_id
     ) THEN
-      RAISE EXCEPTION 'A direct message conversation already exists between these users in this workspace';
+      RAISE EXCEPTION 'A direct message conversation already exists for these users';
     END IF;
   END IF;
 
@@ -435,11 +427,7 @@ END;
 $$ LANGUAGE plpgsql;
 ```
 
-- Enforces DM rules at the database level
-- Prevents duplicate DMs between the same users
-- Ensures direct messages have exactly 2 participants
-
-### Unread Counts
+### 2) Unread Counts
 
 ```sql
 CREATE OR REPLACE FUNCTION get_channel_unread_counts(user_id_param UUID)
@@ -448,13 +436,13 @@ RETURNS TABLE (
   channel_name TEXT,
   unread_count BIGINT
 ) AS $$
-  SELECT 
+  SELECT
     c.id,
     c.name,
     COUNT(m.id) as unread_count
   FROM channels c
   JOIN channel_members cm ON c.id = cm.channel_id
-  LEFT JOIN messages m ON c.id = m.channel_id 
+  LEFT JOIN messages m ON c.id = m.channel_id
     AND m.created_at > cm.last_read_at
   WHERE cm.user_id = user_id_param
   GROUP BY c.id, c.name;
@@ -465,36 +453,31 @@ RETURNS TABLE (
   conversation_id UUID,
   unread_count BIGINT
 ) AS $$
-  SELECT 
+  SELECT
     c.id,
     COUNT(m.id) as unread_count
   FROM conversations c
   JOIN conversation_participants cp ON c.id = cp.conversation_id
-  LEFT JOIN messages m ON c.id = m.conversation_id 
+  LEFT JOIN messages m ON c.id = m.conversation_id
     AND m.created_at > cp.last_read_at
   WHERE cp.user_id = user_id_param
   GROUP BY c.id;
 $$ LANGUAGE SQL;
 ```
 
-- Efficiently calculates unread message counts
-- Used for displaying unread indicators in UI
-- Leverages last_read_at timestamps
-
-### Workspace Slug Generation
+### 3) Workspace Slug Generation
 
 ```sql
 CREATE OR REPLACE FUNCTION generate_unique_workspace_slug(workspace_name TEXT)
 RETURNS TEXT AS $$
 DECLARE
   base_slug TEXT;
-  new_slug TEXT;
   highest_number INT;
 BEGIN
   -- Convert to lowercase, replace spaces/special chars with hyphens
   base_slug := lower(regexp_replace(workspace_name, '[^a-zA-Z0-9\s]', '', 'g'));
   base_slug := regexp_replace(base_slug, '\s+', '-', 'g');
-  
+
   -- First try without a number
   IF NOT EXISTS (SELECT 1 FROM workspaces WHERE slug = base_slug) THEN
     RETURN base_slug;
@@ -509,27 +492,23 @@ BEGIN
       )::INT
     ),
     0
-  )
-  INTO highest_number
+  ) INTO highest_number
   FROM workspaces
   WHERE slug ~ ('^' || base_slug || '-[0-9]+$');
 
-  -- Use next number
   RETURN base_slug || '-' || (highest_number + 1)::TEXT;
 END;
 $$ LANGUAGE plpgsql;
 
--- Trigger function to handle slug generation/updates
 CREATE OR REPLACE FUNCTION handle_workspace_slug()
 RETURNS TRIGGER AS $$
 BEGIN
-  -- Only generate new slug if name changed or slug is null
-  IF (TG_OP = 'INSERT') OR 
-     (TG_OP = 'UPDATE' AND NEW.name <> OLD.name) OR
-     (NEW.slug IS NULL) THEN
+  IF (TG_OP = 'INSERT')
+     OR (TG_OP = 'UPDATE' AND NEW.name <> OLD.name)
+     OR (NEW.slug IS NULL) THEN
     NEW.slug := generate_unique_workspace_slug(NEW.name);
   END IF;
-  
+
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -540,34 +519,27 @@ FOR EACH ROW
 EXECUTE FUNCTION handle_workspace_slug();
 ```
 
-- Automatically generates URL-friendly slugs from workspace names
-- Handles duplicate names by appending numbers
-- Updates slug when workspace name changes
-- Efficiently finds next available number for duplicates
-
-### Channel Slug Generation
+### 4) Channel Slug Generation
 
 ```sql
 CREATE OR REPLACE FUNCTION generate_unique_channel_slug(channel_name TEXT, workspace_id_param UUID)
 RETURNS TEXT AS $$
 DECLARE
   base_slug TEXT;
-  new_slug TEXT;
   highest_number INT;
 BEGIN
-  -- Convert to lowercase, replace spaces/special chars with hyphens
   base_slug := lower(regexp_replace(channel_name, '[^a-zA-Z0-9\s]', '', 'g'));
   base_slug := regexp_replace(base_slug, '\s+', '-', 'g');
-  
-  -- First try without a number
+
   IF NOT EXISTS (
-    SELECT 1 FROM channels 
-    WHERE workspace_id = workspace_id_param AND slug = base_slug
+    SELECT 1
+    FROM channels
+    WHERE workspace_id = workspace_id_param
+      AND slug = base_slug
   ) THEN
     RETURN base_slug;
   END IF;
 
-  -- Find highest number used for this base slug in this workspace
   SELECT COALESCE(
     MAX(
       NULLIF(
@@ -579,25 +551,22 @@ BEGIN
   )
   INTO highest_number
   FROM channels
-  WHERE workspace_id = workspace_id_param 
-  AND slug ~ ('^' || base_slug || '-[0-9]+$');
+  WHERE workspace_id = workspace_id_param
+    AND slug ~ ('^' || base_slug || '-[0-9]+$');
 
-  -- Use next number
   RETURN base_slug || '-' || (highest_number + 1)::TEXT;
 END;
 $$ LANGUAGE plpgsql;
 
--- Trigger function to handle slug generation/updates
 CREATE OR REPLACE FUNCTION handle_channel_slug()
 RETURNS TRIGGER AS $$
 BEGIN
-  -- Only generate new slug if name changed or slug is null
-  IF (TG_OP = 'INSERT') OR 
-     (TG_OP = 'UPDATE' AND NEW.name <> OLD.name) OR
-     (NEW.slug IS NULL) THEN
+  IF (TG_OP = 'INSERT')
+     OR (TG_OP = 'UPDATE' AND NEW.name <> OLD.name)
+     OR (NEW.slug IS NULL) THEN
     NEW.slug := generate_unique_channel_slug(NEW.name, NEW.workspace_id);
   END IF;
-  
+
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -608,85 +577,59 @@ FOR EACH ROW
 EXECUTE FUNCTION handle_channel_slug();
 ```
 
-- Automatically generates URL-friendly slugs from channel names
-- Handles duplicates efficiently using sequential numbers
-- Updates slug when channel name changes
-- Efficiently finds next available number for duplicates
+### SECURITY DEFINER Function for Workspace Invites
 
-## Design Decisions
-
-1. **Unified Messages Table**
-   - Single table for both channel and conversation messages
-   - Simplifies querying and maintenance
-   - CHECK constraint ensures message location integrity
-
-2. **Simple Threading Model**
-   - parent_id approach chosen for simplicity
-   - Allows for nested threads if needed
-   - Efficient indexing for thread queries
-
-3. **Last Read Tracking**
-   - Stored at member level (channel_members and conversation_participants)
-   - Enables efficient unread count calculations
-   - Supports real-time unread indicators
-
-4. **Presence System**
-   - Uses last_seen in profiles table
-   - Simple but effective for basic online/offline status
-   - Indexed for efficient presence queries
-
-5. **Workspace Invites**
-   - Built-in invite system with expiration
-   - Supports revoking invites
-   - Indexed for quick invite validation
-
-6. **Real-time Considerations**
-   - Indexes support efficient real-time queries
-   - Optimized for latest message retrieval
-   - Supports Supabase's real-time functionality
-
-7. **Channel Name Uniqueness**
-   - Enforces unique channel names within each workspace
-   - Allows same channel name in different workspaces
-   - Prevents confusion within a workspace
-
-8. **Automatic Slug Generation**
-   - Converts workspace names to URL-friendly slugs
-   - Handles duplicates efficiently using sequential numbers
-   - Maintains slug synchronization with workspace name changes
-
-## Row Level Security (RLS)
-
-All tables have RLS enabled for security:
+New in this updated schema: a function that returns a workspace slug and bypasses RLS for membership insertion.
 
 ```sql
-ALTER TABLE workspaces ENABLE ROW LEVEL SECURITY;
-ALTER TABLE workspace_members ENABLE ROW LEVEL SECURITY;
-ALTER TABLE channels ENABLE ROW LEVEL SECURITY;
-ALTER TABLE channel_members ENABLE ROW LEVEL SECURITY;
-ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE conversation_participants ENABLE ROW LEVEL SECURITY;
-ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
+CREATE OR REPLACE FUNCTION join_workspace_with_code(_invite_code text)
+RETURNS text  -- returns the workspace slug
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  _workspace_slug text;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Must be authenticated to join a workspace.';
+  END IF;
+
+  SELECT slug
+  INTO _workspace_slug
+  FROM workspaces
+  WHERE invite_code = _invite_code
+    AND invite_is_revoked = false
+    AND (
+      invite_expires_at IS NULL
+      OR invite_expires_at > now()
+    )
+  LIMIT 1;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Invalid or expired invite code.';
+  END IF;
+
+  INSERT INTO workspace_members (workspace_id, user_id, role)
+  SELECT w.id, auth.uid(), 'member'
+  FROM workspaces w
+  WHERE w.slug = _workspace_slug
+  ON CONFLICT DO NOTHING;
+
+  RETURN _workspace_slug;
+END;
+$$;
+
+-- Revoke direct inserts for normal users:
+REVOKE INSERT ON workspace_members FROM authenticated;
 ```
 
-## Real-time Enabled
+- SECURITY DEFINER bypasses RLS so the function can check the workspace invite code and do the insert
+- If the invite is valid, the user becomes a member (role = 'member')
+- The function returns the workspace slug, allowing the app to redirect directly to "/workspace/<slug>"
 
-Tables are added to Supabase's real-time publication:
-
-```sql
-ALTER PUBLICATION supabase_realtime ADD TABLE workspaces;
-ALTER PUBLICATION supabase_realtime ADD TABLE workspace_members;
-ALTER PUBLICATION supabase_realtime ADD TABLE channels;
-ALTER PUBLICATION supabase_realtime ADD TABLE channel_members;
-ALTER PUBLICATION supabase_realtime ADD TABLE conversations;
-ALTER PUBLICATION supabase_realtime ADD TABLE conversation_participants;
-ALTER PUBLICATION supabase_realtime ADD TABLE messages;
-```
-
-## Channel Policies and Automation
+### Channel Policies and Automation
 
 ```sql
--- Enable RLS
 ALTER TABLE channels ENABLE ROW LEVEL SECURITY;
 ALTER TABLE channel_members ENABLE ROW LEVEL SECURITY;
 
@@ -695,22 +638,24 @@ CREATE POLICY "Members can view channels"
 ON channels FOR SELECT
 TO authenticated
 USING (
-    EXISTS (
-        SELECT 1 FROM workspace_members
-        WHERE workspace_id = channels.workspace_id
-        AND user_id = auth.uid()
-    )
+  EXISTS (
+    SELECT 1
+    FROM workspace_members
+    WHERE workspace_id = channels.workspace_id
+      AND user_id = auth.uid()
+  )
 );
 
 CREATE POLICY "Members can create channels"
 ON channels FOR INSERT
 TO authenticated
 WITH CHECK (
-    EXISTS (
-        SELECT 1 FROM workspace_members
-        WHERE workspace_id = channels.workspace_id
-        AND user_id = auth.uid()
-    )
+  EXISTS (
+    SELECT 1
+    FROM workspace_members
+    WHERE workspace_id = channels.workspace_id
+      AND user_id = auth.uid()
+  )
 );
 
 CREATE POLICY "Members can view channel members"
@@ -722,16 +667,17 @@ CREATE POLICY "Members can join channels"
 ON channel_members FOR INSERT
 TO authenticated
 WITH CHECK (
-    user_id = auth.uid() AND
-    EXISTS (
-        SELECT 1 FROM workspace_members wm
-        JOIN channels c ON c.workspace_id = wm.workspace_id
-        WHERE c.id = channel_id
-        AND wm.user_id = auth.uid()
-    )
+  user_id = auth.uid()
+  AND EXISTS (
+    SELECT 1
+    FROM workspace_members wm
+    JOIN channels c ON c.workspace_id = wm.workspace_id
+    WHERE c.id = channel_id
+      AND wm.user_id = auth.uid()
+  )
 );
 
--- Automatic General Channel Creation
+-- Automatic 'general' channel creation
 CREATE OR REPLACE FUNCTION create_general_channel()
 RETURNS TRIGGER
 SECURITY DEFINER
@@ -741,7 +687,6 @@ AS $$
 DECLARE
     general_channel_id UUID;
 BEGIN
-    -- Create the general channel
     INSERT INTO channels (workspace_id, name, description, created_by)
     VALUES (
         NEW.id,
@@ -751,7 +696,6 @@ BEGIN
     )
     RETURNING id INTO general_channel_id;
 
-    -- Add the creator as a member of the channel
     INSERT INTO channel_members (channel_id, user_id, role)
     VALUES (general_channel_id, NEW.created_by, 'admin');
 
@@ -759,7 +703,7 @@ BEGIN
 END;
 $$;
 
--- Auto-join New Members to General
+-- Auto-join new members to 'general'
 CREATE OR REPLACE FUNCTION auto_join_general_channel()
 RETURNS TRIGGER
 SECURITY DEFINER
@@ -771,14 +715,13 @@ BEGIN
     SELECT c.id, NEW.user_id, 'member'
     FROM channels c
     WHERE c.workspace_id = NEW.workspace_id
-    AND c.name = 'general'
+      AND c.name = 'general'
     ON CONFLICT DO NOTHING;
 
     RETURN NEW;
 END;
 $$;
 
--- Trigger Definitions
 CREATE TRIGGER workspace_general_channel_trigger
 AFTER INSERT ON workspaces
 FOR EACH ROW
@@ -790,21 +733,68 @@ FOR EACH ROW
 EXECUTE FUNCTION auto_join_general_channel();
 ```
 
-These policies and triggers implement:
+- Automatically creates a general channel for each workspace
+- Workspace creator is admin of general
+- All new members automatically join general
 
-1. **Channel Access Control**:
-   - Workspace members can view all channels in their workspace
-   - Members can create new channels
-   - Anyone can view channel member lists
-   - Members can only join channels in their workspaces
+## Final RLS and Real-time Configuration
 
-2. **Automatic Channel Management**:
-   - Each new workspace automatically gets a 'general' channel
-   - Workspace creator becomes admin of 'general'
-   - New workspace members are automatically added to 'general'
+```sql
+-- Enable RLS on all relevant tables
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workspaces ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workspace_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE channels ENABLE ROW LEVEL SECURITY;
+ALTER TABLE channel_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conversation_participants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 
-3. **Security Implementation**:
-   - Regular operations are controlled by RLS policies
-   - System operations (general channel creation/auto-join) use `SECURITY DEFINER`
-   - Search path is explicitly set for security
-   - Triggers run with elevated privileges to bypass RLS for system tasks
+-- Real-time publication
+ALTER PUBLICATION supabase_realtime ADD TABLE workspaces;
+ALTER PUBLICATION supabase_realtime ADD TABLE workspace_members;
+ALTER PUBLICATION supabase_realtime ADD TABLE channels;
+ALTER PUBLICATION supabase_realtime ADD TABLE channel_members;
+ALTER PUBLICATION supabase_realtime ADD TABLE conversations;
+ALTER PUBLICATION supabase_realtime ADD TABLE conversation_participants;
+ALTER PUBLICATION supabase_realtime ADD TABLE messages;
+```
+
+## Design Decisions
+
+### Automatic Owner Assignment
+- Workspace creators are automatically assigned as owners via a trigger
+- Uses SECURITY DEFINER to bypass RLS for the initial owner assignment
+- Ensures consistent ownership setup for all new workspaces
+
+### Extended Workspace Visibility
+- Creators and members can see a workspace
+- Non-members remain blocked by RLS
+
+### Invite-based Membership
+- SECURITY DEFINER function `join_workspace_with_code`
+- Returns the slug for easy client-side redirects
+- Direct INSERT to workspace_members is disallowed for normal users
+
+### Unified Messages Table
+- Single table for channels and conversations
+- Simplifies queries and maintenance
+- Threading with parent_id
+- Basic approach supports nested threads
+- Indexing for thread queries
+
+### Auto-Generated Slugs
+- Ensures unique, URL-friendly workspace/channel slugs
+- Duplicate names get a numeric suffix
+
+### Real-time Support
+- Indexed for latest message queries
+- Compatible with Supabase real-time
+
+### Automatic general Channel
+- On workspace creation, we create general
+- New members automatically join general
+
+### Presence & Profiles
+- last_seen in profiles for presence
+- Row-level security ensures privacy

@@ -1,46 +1,47 @@
-import { createClient } from '@/utils/supabase/server'
-import { notFound } from 'next/navigation'
-import { MessageContainer } from '@/components/messages/MessageContainer'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { createClient } from "@/utils/supabase/server";
+import { notFound } from "next/navigation";
+import { MessageContainer } from "@/components/messages/MessageContainer";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 type ConversationParticipant = {
-  user_id: string
-  profiles: {
-    full_name: string
-    display_name: string | null
-    avatar_url: string | null
-  }
-}
+	user_id: string;
+	profiles: {
+		full_name: string;
+		display_name: string | null;
+		avatar_url: string | null;
+		avatar_cache: string | null;
+	};
+};
 
 type Conversation = {
-  id: string
-  type: 'direct' | 'group'
-  conversation_participants: ConversationParticipant[]
-}
+	id: string;
+	type: "direct" | "group";
+	conversation_participants: ConversationParticipant[];
+};
 
 export default async function ConversationPage({
-  params
+	params,
 }: {
-  params: Promise<{ workspaceSlug: string; conversationId: string }>
+	params: Promise<{ workspaceSlug: string; conversationId: string }>;
 }) {
-  const { workspaceSlug, conversationId } = await params
-  const supabase = await createClient()
+	const { workspaceSlug, conversationId } = await params;
+	const supabase = await createClient();
 
-  // Get workspace ID from slug
-  const { data: workspace } = await supabase
-    .from('workspaces')
-    .select('id, name')
-    .eq('slug', workspaceSlug)
-    .single()
+	// Get workspace ID from slug
+	const { data: workspace } = await supabase
+		.from("workspaces")
+		.select("id, name")
+		.eq("slug", workspaceSlug)
+		.single();
 
-  if (!workspace) {
-    notFound()
-  }
+	if (!workspace) {
+		notFound();
+	}
 
-  // Get conversation and participants
-  const { data: conversation } = await supabase
-    .from('conversations')
-    .select(`
+	// Get conversation and participants
+	const { data: conversation } = (await supabase
+		.from("conversations")
+		.select(`
       id,
       type,
       conversation_participants!inner (
@@ -48,59 +49,74 @@ export default async function ConversationPage({
         profiles!inner (
           full_name,
           display_name,
-          avatar_url
+          avatar_url,
+          avatar_cache
         )
       )
     `)
-    .eq('id', conversationId)
-    .eq('workspace_id', workspace.id)
-    .single() as { data: Conversation | null }
+		.eq("id", conversationId)
+		.eq("workspace_id", workspace.id)
+		.single()) as { data: Conversation | null };
 
-  if (!conversation) {
-    notFound()
-  }
+	if (!conversation) {
+		notFound();
+	}
 
-  // Get current user
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) {
-    notFound()
-  }
+	// Get current user
+	const {
+		data: { user },
+	} = await supabase.auth.getUser();
+	if (!user) {
+		notFound();
+	}
 
-  // Get the other participant's profile for DM header
-  const otherParticipants = conversation.conversation_participants.filter(
-    participant => participant.user_id !== user.id
-  )
+	// Get the other participant's profile for DM header
+	const otherParticipants = conversation.conversation_participants.filter(
+		(participant) => participant.user_id !== user.id,
+	);
 
-  return (
-    <div className="flex-1 flex flex-col">
-      {/* Conversation Header */}
-      <div className="border-b border-border p-4">
-        <div className="flex items-center gap-3">
-          {conversation.type === 'direct' && otherParticipants[0] && (
-            <>
-              <Avatar>
-                <AvatarImage
-                  src={otherParticipants[0].profiles.avatar_url || undefined}
-                  alt={otherParticipants[0].profiles.display_name || otherParticipants[0].profiles.full_name}
-                />
-                <AvatarFallback>
-                  {(otherParticipants[0].profiles.display_name || otherParticipants[0].profiles.full_name)
-                    .split(' ')
-                    .map((n: string) => n[0])
-                    .join('')
-                    .toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
-              <h1 className="font-semibold">
-                {otherParticipants[0].profiles.display_name || otherParticipants[0].profiles.full_name}
-              </h1>
-            </>
-          )}
-        </div>
-      </div>
+	return (
+		<div className="flex-1 flex flex-col">
+			{/* Conversation Header */}
+			<div className="border-b border-border p-4">
+				<div className="flex items-center gap-3">
+					{conversation.type === "direct" && otherParticipants[0] && (
+						<>
+							<Avatar>
+								<AvatarImage
+									src={
+										otherParticipants[0].profiles.avatar_url ||
+										(otherParticipants[0].profiles.avatar_cache
+											? `data:image/jpeg;base64,${otherParticipants[0].profiles.avatar_cache}`
+											: undefined)
+									}
+									alt={
+										otherParticipants[0].profiles.display_name ||
+										otherParticipants[0].profiles.full_name
+									}
+								/>
+								<AvatarFallback>
+									{(
+										otherParticipants[0].profiles.display_name ||
+										otherParticipants[0].profiles.full_name
+									)
+										.split(" ")
+										.map((n: string) => n[0])
+										.join("")
+										.toUpperCase()}
+								</AvatarFallback>
+							</Avatar>
+							<h1 className="font-semibold">
+								{otherParticipants[0].profiles.display_name ||
+									otherParticipants[0].profiles.full_name}
+							</h1>
+						</>
+					)}
+				</div>
+			</div>
 
-      {/* Messages */}
-      <MessageContainer conversationId={conversationId} />
-    </div>
-  )
-} 
+			{/* Messages */}
+			<MessageContainer conversationId={conversationId} />
+		</div>
+	);
+}
