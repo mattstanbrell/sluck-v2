@@ -24,7 +24,6 @@ export async function GET(request: Request) {
 	// Get the authenticated user
 	const {
 		data: { user },
-		error: userError,
 	} = await supabase.auth.getUser();
 
 	// If no user, redirect to homepage

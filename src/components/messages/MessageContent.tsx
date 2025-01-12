@@ -1,10 +1,8 @@
-"use client";
-
+import React from "react";
 import ReactMarkdown from "react-markdown";
-import { Components } from "react-markdown";
+import type { Components } from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/cjs/styles/prism";
-import type { CodeProps } from "react-markdown/lib/ast-to-react";
 
 interface MessageContentProps {
 	content: string;
@@ -12,27 +10,25 @@ interface MessageContentProps {
 
 export function MessageContent({ content }: MessageContentProps) {
 	const customRenderers: Partial<Components> = {
-		code({ node, inline, className, children, ...props }: CodeProps) {
+		code(props) {
+			const { children, className, ...rest } = props;
 			const match = /language-(\w+)/.exec(className || "");
-			const content = String(children).replace(/\n$/, "");
+			const code = String(children).replace(/\n$/, "");
 
-			if (!inline && match) {
+			if (!match) {
 				return (
-					<SyntaxHighlighter
-						style={oneDark}
-						language={match[1]}
-						PreTag="div"
-						{...props}
-					>
-						{content}
-					</SyntaxHighlighter>
+					<code {...rest} className={className}>
+						{children}
+					</code>
 				);
 			}
 
 			return (
-				<code className={className} {...props}>
-					{children}
-				</code>
+				<div className="syntax-highlighter">
+					<SyntaxHighlighter language={match[1]} style={oneDark} PreTag="div">
+						{code}
+					</SyntaxHighlighter>
+				</div>
 			);
 		},
 	};

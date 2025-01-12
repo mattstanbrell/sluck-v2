@@ -4,13 +4,12 @@ import { Button } from "@/components/ui/button";
 import {
 	Dialog,
 	DialogContent,
-	DialogDescription,
 	DialogHeader,
 	DialogTitle,
 	DialogTrigger,
 } from "@/components/ui/dialog";
-import { Settings, Copy, RefreshCw, Check, X } from "lucide-react";
-import { useState, useEffect } from "react";
+import { Settings, Copy, RefreshCw, Check } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/utils/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { generateWorkspaceInvite } from "@/app/actions/workspace";
@@ -35,15 +34,7 @@ export function WorkspaceSettingsDialog({
 	const supabase = createClient();
 	const { toast } = useToast();
 
-	// Load invite data when dialog opens
-	useEffect(() => {
-		if (open) {
-			setIsLoadingInitial(true);
-			loadInviteData().finally(() => setIsLoadingInitial(false));
-		}
-	}, [open]);
-
-	const loadInviteData = async () => {
+	const loadInviteData = useCallback(async () => {
 		const { data, error } = await supabase
 			.from("workspaces")
 			.select("invite_code, invite_expires_at, invite_is_revoked")
@@ -56,7 +47,15 @@ export function WorkspaceSettingsDialog({
 		}
 
 		setInviteData(data);
-	};
+	}, [workspaceId, supabase]);
+
+	// Load invite data when dialog opens
+	useEffect(() => {
+		if (open) {
+			setIsLoadingInitial(true);
+			loadInviteData().finally(() => setIsLoadingInitial(false));
+		}
+	}, [open, loadInviteData]);
 
 	const generateInviteCode = async () => {
 		setIsLoading(true);
@@ -65,7 +64,7 @@ export function WorkspaceSettingsDialog({
 
 			// Update the local state immediately
 			setInviteData(data);
-		} catch (error) {
+		} catch {
 			toast({
 				title: "Error",
 				description: "Failed to generate invite code",
@@ -74,16 +73,6 @@ export function WorkspaceSettingsDialog({
 		} finally {
 			setIsLoading(false);
 		}
-	};
-
-	const copyInviteCode = async () => {
-		if (!inviteData?.invite_code) return;
-		await navigator.clipboard.writeText(inviteData.invite_code);
-
-		toast({
-			title: "Success",
-			description: "Invite code copied to clipboard",
-		});
 	};
 
 	const copyInviteLink = async () => {
@@ -108,9 +97,9 @@ export function WorkspaceSettingsDialog({
 				<Button
 					variant="ghost"
 					size="icon"
-					className="text-custom-text-secondary hover:text-custom-text hover:bg-custom-ui-faint"
+					className="w-5 h-5 text-custom-text-secondary hover:text-custom-text hover:bg-custom-ui-faint"
 				>
-					<Settings className="w-4 h-4" />
+					<Settings className="w-3 h-3" />
 				</Button>
 			</DialogTrigger>
 			<DialogContent className="sm:max-w-[600px] bg-custom-background border-custom-ui-medium [&>button]:right-6 [&>button]:top-6 [&>button]:opacity-70 [&>button]:text-custom-text-secondary hover:[&>button]:text-custom-text hover:[&>button]:bg-custom-ui-faint hover:[&>button]:opacity-100 hover:[&>button]:shadow-lg">

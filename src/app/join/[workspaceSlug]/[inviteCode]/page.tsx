@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/utils/supabase/client";
-import { useRouter } from "next/navigation";
+import { useRouter, useParams } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { joinWorkspaceWithCode } from "@/app/actions/workspace";
@@ -12,11 +12,10 @@ interface WorkspaceData {
 	name: string;
 }
 
-export default function JoinWorkspacePage({
-	params,
-}: {
-	params: { workspaceSlug: string; inviteCode: string };
-}) {
+export default function JoinWorkspacePage() {
+	const params = useParams();
+	const workspaceSlug = params.workspaceSlug as string;
+	const inviteCode = params.inviteCode as string;
 	const [isLoading, setIsLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [workspaceData, setWorkspaceData] = useState<WorkspaceData | null>(
@@ -44,7 +43,7 @@ export default function JoinWorkspacePage({
 				const { data: workspace, error: workspaceError } = await supabase
 					.from("workspaces")
 					.select("id, name")
-					.eq("slug", params.workspaceSlug)
+					.eq("slug", workspaceSlug)
 					.single();
 
 				if (workspaceError || !workspace) {
@@ -54,7 +53,7 @@ export default function JoinWorkspacePage({
 				}
 
 				// Check if user is already a member
-				const { data: membership, error: membershipError } = await supabase
+				const { data: membership } = await supabase
 					.from("workspace_members")
 					.select("user_id")
 					.eq("workspace_id", workspace.id)
@@ -62,25 +61,25 @@ export default function JoinWorkspacePage({
 					.single();
 
 				if (membership) {
-					router.push(`/workspace/${params.workspaceSlug}`);
+					router.push(`/workspace/${workspaceSlug}`);
 					return;
 				}
 
 				setWorkspaceData(workspace);
 				setIsLoading(false);
-			} catch (error) {
+			} catch {
 				setError("An unexpected error occurred");
 				setIsLoading(false);
 			}
 		}
 
 		validateInvite();
-	}, [params.workspaceSlug, supabase, router]);
+	}, [workspaceSlug, supabase, router]);
 
 	const handleJoin = async () => {
 		try {
 			setIsLoading(true);
-			const { slug } = await joinWorkspaceWithCode(params.inviteCode);
+			const { slug } = await joinWorkspaceWithCode(inviteCode);
 
 			toast({
 				title: "Success",
@@ -130,7 +129,7 @@ export default function JoinWorkspacePage({
 					Join {workspaceData?.name}
 				</h1>
 				<p className="text-custom-text-secondary">
-					You've been invited to join this workspace
+					You&apos;ve been invited to join this workspace
 				</p>
 				<Button
 					onClick={handleJoin}

@@ -25,29 +25,53 @@ type Message = Database["public"]["Tables"]["messages"]["Row"] & {
 	};
 };
 
+type MessageGroup = {
+	userId: string;
+	messages: Message[];
+};
+
 /**
  * Group consecutive messages from the same user
  * into "chains". So if userA sends 3 in a row, that becomes 1 chain.
  */
-function groupConsecutiveMessages(messages: Message[]) {
+function groupConsecutiveMessages(messages: Message[]): MessageGroup[] {
 	if (!messages.length) return [];
-	const groups: Array<{ userId: string; messages: Message[] }> = [];
-	let currentGroup = {
-		userId: messages[0].profile.id,
-		messages: [messages[0]],
-	};
+
+	const groups: MessageGroup[] = [];
+	let currentGroup: MessageGroup = { userId: "", messages: [] };
+
+	if (messages[0]?.profile?.id) {
+		currentGroup = {
+			userId: messages[0].profile.id,
+			messages: [messages[0]],
+		};
+	}
 
 	for (let i = 1; i < messages.length; i++) {
 		const m = messages[i];
+
+		// If the message lacks a valid profile or ID, decide how you want to handle it:
+		if (!m.profile || !m.profile.id) {
+			// Option A: skip it
+			continue;
+			// Option B: handle differently (e.g., push into a special group)
+		}
+
+		// Compare the current message's user ID with our currentGroup
 		if (m.profile.id === currentGroup.userId) {
 			currentGroup.messages.push(m);
 		} else {
+			// Start a new group whenever the user ID changes
 			groups.push(currentGroup);
 			currentGroup = { userId: m.profile.id, messages: [m] };
 		}
 	}
 
-	groups.push(currentGroup);
+	// Ensure the last group is included
+	if (currentGroup.messages.length > 0) {
+		groups.push(currentGroup);
+	}
+
 	return groups;
 }
 
@@ -69,7 +93,7 @@ export function MessageList({
 
 	useEffect(() => {
 		scrollToBottom();
-	}, [messages, scrollToBottom]);
+	}, [scrollToBottom]);
 
 	// Fetch & subscribe to messages
 	useEffect(() => {
@@ -244,7 +268,7 @@ function ChainGroup({
 			WebkitMaskImage: "linear-gradient(to bottom, black, transparent)",
 			transition: "height 1s ease-out",
 		});
-	}, [messages, showChainLine, userProfile.avatar_color, isMounted]);
+	}, [showChainLine, userProfile.avatar_color, isMounted]);
 
 	return (
 		<div ref={chainRef} className="mt-6 space-y-0.5">
@@ -293,7 +317,7 @@ function ChainGroup({
 				{/* Name + Timestamp + Content */}
 				<div className="flex-1 min-w-0">
 					<div className="flex items-baseline mb-0.5">
-						<span className="font-medium text-custom-text">
+						<span className="font-semibold text-custom-text">
 							{userProfile.display_name || userProfile.full_name}
 						</span>
 						<MessageTimestamp

@@ -1,6 +1,5 @@
 "use client";
 
-import { Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/utils/supabase/client";
 import { useEffect, useState } from "react";
@@ -9,6 +8,7 @@ import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { CreateChannelDialog } from "./CreateChannelDialog";
 import { WorkspaceSettingsDialog } from "./WorkspaceSettingsDialog";
+import { CreateDirectMessageDialog } from "./CreateDirectMessageDialog";
 
 interface WorkspaceData {
 	name: string;
@@ -139,7 +139,7 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 		<div className="w-64 bg-custom-background-secondary border-r border-custom-ui-medium flex flex-col">
 			{/* Workspace Header */}
 			<div className="px-4 py-4 flex items-center justify-between">
-				<h1 className="font-semibold text-lg text-custom-text px-1">
+				<h1 className="font-semibold text-lg text-custom-text">
 					{workspace?.name || "Loading..."}
 				</h1>
 				<WorkspaceSettingsDialog
@@ -150,12 +150,17 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 			<div className="mx-4 border-t border-custom-ui-medium" />
 
 			{/* Channels Section */}
-			<div className="flex-1 p-4 mt-6 space-y-4">
-				<div className="flex items-center justify-between">
+			<div className="flex-1 p-4 mt-6">
+				<div className="flex items-center justify-between mb-3">
 					<h2 className="font-medium text-sm text-custom-text-secondary">
 						Channels
 					</h2>
-					<CreateChannelDialog workspaceId={workspaceId} />
+					<div className="scale-125">
+						<CreateChannelDialog
+							workspaceId={workspaceId}
+							workspaceSlug={workspace?.slug || ""}
+						/>
+					</div>
 				</div>
 				<nav className="space-y-1">
 					{channels.map((channel) => {
@@ -192,10 +197,18 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 				</nav>
 
 				{/* Direct Messages Section */}
-				<div>
-					<h2 className="font-medium text-sm text-custom-text-secondary mb-2">
-						Direct Messages
-					</h2>
+				<div className="mt-6">
+					<div className="flex items-center justify-between mb-2">
+						<h2 className="font-medium text-sm text-custom-text-secondary">
+							Direct Messages
+						</h2>
+						<div className="scale-125">
+							<CreateDirectMessageDialog
+								workspaceId={workspaceId}
+								workspaceSlug={workspace?.slug || ""}
+							/>
+						</div>
+					</div>
 					<nav className="space-y-1">{/* Will implement DM list later */}</nav>
 				</div>
 			</div>
@@ -203,7 +216,7 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 			{/* User Section */}
 			<div className="mx-4 border-t border-custom-ui-medium mt-auto" />
 			<div className="px-4 py-4">
-				<div className="flex items-center justify-between px-1">
+				<div className="flex items-center justify-between">
 					<Avatar className="h-8 w-8 rounded-xl">
 						<AvatarImage src={avatarSrc} alt={displayName} />
 						<AvatarFallback className="bg-custom-text-secondary text-white rounded-xl">

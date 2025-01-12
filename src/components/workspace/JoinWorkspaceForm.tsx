@@ -23,7 +23,7 @@ export function JoinWorkspaceForm() {
 			if (joinIndex !== -1 && pathParts.length >= joinIndex + 3) {
 				return pathParts[joinIndex + 2]; // Return just the invite code
 			}
-		} catch (e) {
+		} catch {
 			// Not a URL, treat as invite code
 		}
 
