@@ -13,7 +13,8 @@ import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/utils/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { UserAvatar } from "@/components/ui/UserAvatar";
+import { RefreshCw } from "lucide-react";
 
 interface UserProfile {
 	id: string;
@@ -190,76 +191,32 @@ export function CreateDirectMessageDialog({
 			otherUserId,
 		);
 		try {
-			const {
-				data: { user },
-				error: userError,
-			} = await supabase.auth.getUser();
-			if (userError) {
-				console.error(
-					"[startConversation] Error fetching current user:",
-					userError,
-				);
-			}
-			console.log("[startConversation] Current user =>", user?.id);
-
-			if (!user) throw new Error("Not authenticated");
-
-			// 1) Create conversation
-			console.log(
-				"[startConversation] Creating new conversation in workspace =>",
-				workspaceId,
+			// Call the SECURITY DEFINER function
+			const { data: conversationId, error } = await supabase.rpc(
+				"create_direct_message",
+				{
+					workspace_id_param: workspaceId,
+					other_user_id_param: otherUserId,
+				},
 			);
-			const { data: conversation, error: conversationError } = await supabase
-				.from("conversations")
-				.insert({
-					workspace_id: workspaceId,
-					type: "direct",
-				})
-				.select()
-				.single();
 
-			if (conversationError) {
+			if (error) {
 				console.error(
 					"[startConversation] Error creating conversation:",
-					conversationError,
+					error,
 				);
-				throw conversationError;
-			}
-			console.log("[startConversation] Created conversation =>", conversation);
-
-			// 2) Add participants
-			console.log(
-				"[startConversation] Inserting conversation_participants =>",
-				[user.id, otherUserId],
-			);
-			const { error: participantsError } = await supabase
-				.from("conversation_participants")
-				.insert([
-					{ conversation_id: conversation.id, user_id: user.id },
-					{ conversation_id: conversation.id, user_id: otherUserId },
-				]);
-
-			if (participantsError) {
-				console.error(
-					"[startConversation] Error inserting participants:",
-					participantsError,
-				);
-				throw participantsError;
+				throw error;
 			}
 
-			console.log(
-				"[startConversation] Conversation participants added successfully.",
-			);
+			console.log("[startConversation] Conversation created successfully");
 			setOpen(false);
 
-			// 3) Redirect user
+			// Navigate to the new conversation
 			console.log(
 				"[startConversation] Navigating to =>",
-				`/workspace/${workspaceSlug}/conversation/${conversation.id}`,
+				`/workspace/${workspaceSlug}/conversation/${conversationId}`,
 			);
-			router.push(
-				`/workspace/${workspaceSlug}/conversation/${conversation.id}`,
-			);
+			router.push(`/workspace/${workspaceSlug}/conversation/${conversationId}`);
 		} catch (error) {
 			console.error("[startConversation] Unexpected error:", error);
 			toast({
@@ -285,60 +242,47 @@ export function CreateDirectMessageDialog({
 					</Button>
 				)}
 			</DialogTrigger>
-			<DialogContent className="sm:max-w-[425px] bg-custom-background border-custom-ui-medium">
+			<DialogContent className="sm:max-w-[600px] bg-custom-background border-custom-ui-medium [&>button]:right-6 [&>button]:top-6 [&>button]:opacity-70 [&>button]:text-custom-text-secondary hover:[&>button]:text-custom-text hover:[&>button]:bg-custom-ui-faint hover:[&>button]:opacity-100 hover:[&>button]:shadow-lg">
 				<DialogHeader>
 					<DialogTitle className="text-custom-text">
-						Start a conversation
+						Start Direct Message
 					</DialogTitle>
 					<DialogDescription className="text-custom-text-secondary">
-						Select a workspace member to start a direct message conversation.
+						Choose a workspace member to start a direct message conversation.
 					</DialogDescription>
 				</DialogHeader>
 
-				<div className="py-4">
-					{isLoading ? (
-						<div className="text-sm text-custom-text-secondary">
-							Loading users...
-						</div>
-					) : availableUsers.length === 0 ? (
-						<div className="text-sm text-custom-text-secondary">
-							No available users to start a conversation with.
-						</div>
-					) : (
-						<div className="space-y-2">
-							{availableUsers.map((user) => {
-								const displayName = user.display_name || user.full_name;
-								const initials = user.full_name
-									.split(" ")
-									.map((n) => n[0])
-									.slice(0, 2)
-									.join("")
-									.toUpperCase();
+				{isLoading ? (
+					<div className="h-[120px] flex items-center justify-center">
+						<RefreshCw className="w-4 h-4 animate-spin text-custom-text-secondary" />
+					</div>
+				) : (
+					<div className="space-y-1">
+						{availableUsers.map((user) => {
+							const displayName = user.display_name || user.full_name;
 
-								return (
-									<Button
-										key={user.id}
-										variant="ghost"
-										className="w-full justify-start gap-3 hover:bg-custom-ui-faint"
-										onClick={() => startConversation(user.id)}
-										disabled={isLoading}
-									>
-										<Avatar className="h-8 w-8 rounded-xl">
-											<AvatarImage
-												src={user.avatar_url || undefined}
-												alt={displayName}
-											/>
-											<AvatarFallback className="bg-custom-text-secondary text-white rounded-xl">
-												{initials}
-											</AvatarFallback>
-										</Avatar>
-										<span className="text-custom-text">{displayName}</span>
-									</Button>
-								);
-							})}
-						</div>
-					)}
-				</div>
+							return (
+								<button
+									key={user.id}
+									onClick={() => startConversation(user.id)}
+									className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-custom-ui-faint text-left"
+									type="button"
+								>
+									<UserAvatar
+										fullName={user.full_name}
+										displayName={user.display_name}
+										avatarUrl={user.avatar_url}
+										avatarCache={user.avatar_cache}
+										size={8}
+									/>
+									<span className="text-sm text-custom-text">
+										{displayName}
+									</span>
+								</button>
+							);
+						})}
+					</div>
+				)}
 			</DialogContent>
 		</Dialog>
 	);

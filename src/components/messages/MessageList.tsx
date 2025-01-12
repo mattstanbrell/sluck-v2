@@ -1,15 +1,17 @@
-import React, {
+import {
 	useEffect,
 	useLayoutEffect,
 	useRef,
 	useState,
 	useCallback,
-	CSSProperties,
+	type CSSProperties,
 } from "react";
 import { createClient } from "@/utils/supabase/client";
 import { MessageContent } from "./MessageContent";
 import { MessageTimestamp } from "./MessageTimestamp";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { UserAvatar } from "@/components/ui/UserAvatar";
+import { Button } from "@/components/ui/button";
+import { MessageCircle } from "lucide-react";
 import type { Database } from "@/lib/database.types";
 
 /* ------------------ Types & Helpers ------------------ */
@@ -78,9 +80,13 @@ function groupConsecutiveMessages(messages: Message[]): MessageGroup[] {
 export function MessageList({
 	channelId,
 	conversationId,
+	parentId,
+	onThreadClick,
 }: {
 	channelId?: string;
 	conversationId?: string;
+	parentId?: string;
+	onThreadClick?: (messageId: string) => void;
 }) {
 	const [messages, setMessages] = useState<Message[]>([]);
 	const supabase = createClient();
@@ -93,14 +99,14 @@ export function MessageList({
 
 	useEffect(() => {
 		scrollToBottom();
-	}, [scrollToBottom]);
+	}, [scrollToBottom, messages]);
 
 	// Fetch & subscribe to messages
 	useEffect(() => {
 		if (!channelId && !conversationId) return;
 
 		async function fetchMessages() {
-			const { data, error } = await supabase
+			const query = supabase
 				.from("messages")
 				.select(
 					`
@@ -121,10 +127,20 @@ export function MessageList({
 				)
 				.order("created_at", { ascending: true });
 
+			// If parentId is provided, filter for thread messages
+			if (parentId) {
+				query.eq("parent_id", parentId);
+			} else {
+				query.is("parent_id", null);
+			}
+
+			const { data, error } = await query;
+
 			if (error) {
 				console.warn("Error fetching messages:", error);
 			} else if (data) {
 				setMessages(data as Message[]);
+				scrollToBottom();
 			}
 		}
 
@@ -144,6 +160,13 @@ export function MessageList({
 						: `conversation_id=eq.${conversationId}`,
 				},
 				async (payload) => {
+					// Skip messages that don't match our view context
+					if (parentId) {
+						if (payload.new.parent_id !== parentId) return;
+					} else {
+						if (payload.new.parent_id !== null) return;
+					}
+
 					// Fetch the newly inserted message with its profile
 					const { data } = await supabase
 						.from("messages")
@@ -173,7 +196,7 @@ export function MessageList({
 		return () => {
 			channel.unsubscribe();
 		};
-	}, [channelId, conversationId, supabase]);
+	}, [channelId, conversationId, parentId, supabase, scrollToBottom]);
 
 	const getInitials = (name: string) =>
 		name
@@ -185,12 +208,14 @@ export function MessageList({
 	const groups = groupConsecutiveMessages(messages);
 
 	return (
-		<div className="flex flex-col p-4 pl-8">
+		<div className="flex flex-col px-8 py-4 overflow-x-hidden">
 			{groups.map((chain) => (
 				<ChainGroup
 					key={`${chain.userId}-${chain.messages[0].id}`}
 					chain={chain}
 					getInitials={getInitials}
+					onThreadClick={onThreadClick}
+					showThreadButton={!parentId}
 				/>
 			))}
 			<div ref={messagesEndRef} />
@@ -202,9 +227,13 @@ export function MessageList({
 function ChainGroup({
 	chain,
 	getInitials,
+	onThreadClick,
+	showThreadButton,
 }: {
 	chain: { userId: string; messages: Message[] };
 	getInitials: (name: string) => string;
+	onThreadClick?: (messageId: string) => void;
+	showThreadButton?: boolean;
 }) {
 	const { messages } = chain;
 	const firstMsg = messages[0];
@@ -213,25 +242,6 @@ function ChainGroup({
 	const chainRef = useRef<HTMLDivElement>(null);
 	const [lineStyle, setLineStyle] = useState<CSSProperties>({});
 	const [isMounted, setIsMounted] = useState(false);
-	const [avatarSrc, setAvatarSrc] = useState<string | undefined>(undefined);
-
-	// Handle avatar loading and fallbacks
-	useEffect(() => {
-		// Try primary URL first
-		const img = new Image();
-		img.onload = () => {
-			setAvatarSrc(userProfile.avatar_url || undefined);
-		};
-		img.onerror = () => {
-			// Try cache if primary URL fails
-			if (userProfile.avatar_cache) {
-				setAvatarSrc(`data:image/jpeg;base64,${userProfile.avatar_cache}`);
-			} else {
-				setAvatarSrc(undefined);
-			}
-		};
-		img.src = userProfile.avatar_url || "";
-	}, [userProfile]);
 
 	useEffect(() => {
 		// Trigger mount animation after a small delay to ensure DOM is ready
@@ -268,7 +278,7 @@ function ChainGroup({
 			WebkitMaskImage: "linear-gradient(to bottom, black, transparent)",
 			transition: "height 1s ease-out",
 		});
-	}, [showChainLine, userProfile.avatar_color, isMounted]);
+	}, [showChainLine, userProfile.avatar_color, isMounted, messages.length]);
 
 	return (
 		<div ref={chainRef} className="mt-6 space-y-0.5">
@@ -279,7 +289,7 @@ function ChainGroup({
 					{
 						["--hover-bg" as string]:
 							userProfile.avatar_color || "rgb(20, 148, 132)",
-					} as React.CSSProperties
+					} as CSSProperties
 				}
 			>
 				<div
@@ -288,28 +298,20 @@ function ChainGroup({
 				/>
 				{/* Avatar */}
 				<div className="relative w-10 flex-shrink-0">
-					<Avatar className="w-10 h-10 rounded-xl">
-						<AvatarImage
-							src={avatarSrc}
-							alt={userProfile.display_name || userProfile.full_name || ""}
-						/>
-						<AvatarFallback className="bg-custom-text-secondary text-white rounded-xl">
-							{getInitials(
-								userProfile.display_name || userProfile.full_name || "",
-							)}
-						</AvatarFallback>
-					</Avatar>
+					<UserAvatar
+						fullName={userProfile.full_name || "User"}
+						displayName={userProfile.display_name}
+						avatarUrl={userProfile.avatar_url}
+						avatarCache={userProfile.avatar_cache}
+						avatarColor={userProfile.avatar_color || "rgb(20, 148, 132)"}
+						size={10}
+					/>
 
 					{/* Chain line */}
 					{showChainLine && (
 						<div
-							className="absolute top-[40px] left-1/2 -translate-x-1/2 w-[2px]"
-							style={{
-								...lineStyle,
-								background: !avatarSrc
-									? "var(--custom-text-secondary)"
-									: lineStyle.background,
-							}}
+							className="absolute left-1/2 top-10 w-0.5 -translate-x-1/2"
+							style={lineStyle}
 						/>
 					)}
 				</div>
@@ -325,7 +327,20 @@ function ChainGroup({
 							className="ml-2"
 						/>
 					</div>
-					<MessageContent content={firstMsg.content} />
+					<div className="group/message">
+						<MessageContent content={firstMsg.content} />
+						{showThreadButton && onThreadClick && (
+							<Button
+								variant="ghost"
+								size="sm"
+								onClick={() => onThreadClick(firstMsg.id)}
+								className="mt-1 text-custom-text-secondary hover:text-custom-text opacity-60 hover:opacity-100 transition-opacity"
+							>
+								<MessageCircle className="h-4 w-4 mr-1" />
+								Reply in thread
+							</Button>
+						)}
+					</div>
 				</div>
 			</div>
 
@@ -355,7 +370,20 @@ function ChainGroup({
 								<div className="absolute left-[3.5rem] top-0 bottom-0 -translate-x-1/2 flex items-center pr-2 opacity-0 group-hover:opacity-100">
 									<MessageTimestamp timestamp={m.created_at} hideColon />
 								</div>
-								<MessageContent content={m.content} />
+								<div className="group/message">
+									<MessageContent content={m.content} />
+									{showThreadButton && onThreadClick && (
+										<Button
+											variant="ghost"
+											size="sm"
+											onClick={() => onThreadClick(m.id)}
+											className="mt-1 text-custom-text-secondary hover:text-custom-text opacity-60 hover:opacity-100 transition-opacity"
+										>
+											<MessageCircle className="h-4 w-4 mr-1" />
+											Reply in thread
+										</Button>
+									)}
+								</div>
 							</div>
 						</div>
 					);

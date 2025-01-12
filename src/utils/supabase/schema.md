@@ -385,32 +385,27 @@ EXECUTE FUNCTION add_creator_as_workspace_owner();
 ### 2) Enforce Conversation Rules
 
 ```sql
-CREATE OR REPLACE FUNCTION enforce_conversation_rules()
+CREATE OR REPLACE FUNCTION enforce_direct_dm_uniqueness()
 RETURNS TRIGGER AS $$
 BEGIN
-  IF (SELECT type FROM conversations WHERE id = NEW.conversation_id) = 'direct' THEN
-    -- Only 2 participants in a direct conversation
-    IF (
-      SELECT COUNT(*)
-      FROM conversation_participants
-      WHERE conversation_id = NEW.conversation_id
-    ) >= 2 THEN
-      RAISE EXCEPTION 'Direct messages can only have 2 participants';
-    END IF;
-
-    -- Prevent duplicate direct conversations between the same users
+  -- Only check for 'direct' conversation if the newly inserted row has a conversation_id
+  IF NEW.conversation_id IS NOT NULL THEN
     IF EXISTS (
       SELECT 1
       FROM conversations c
-      JOIN conversation_participants cp1 ON cp1.conversation_id = c.id
-      JOIN conversation_participants cp2 ON cp2.conversation_id = c.id
+      JOIN conversation_participants cp1
+        ON c.id = cp1.conversation_id
+      JOIN conversation_participants cp2
+        ON c.id = cp2.conversation_id
       WHERE c.workspace_id = (
         SELECT workspace_id
         FROM conversations
         WHERE id = NEW.conversation_id
       )
       AND c.type = 'direct'
+      -- The newly inserted participant
       AND cp1.user_id = NEW.user_id
+      -- The existing participant(s) already in this conversation
       AND cp2.user_id IN (
         SELECT user_id
         FROM conversation_participants
@@ -425,6 +420,11 @@ BEGIN
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+CREATE TRIGGER enforce_direct_dm_uniqueness_trigger
+BEFORE INSERT ON conversation_participants
+FOR EACH ROW
+EXECUTE FUNCTION enforce_direct_dm_uniqueness();
 ```
 
 ### 2) Unread Counts
@@ -736,6 +736,137 @@ EXECUTE FUNCTION auto_join_general_channel();
 - Automatically creates a general channel for each workspace
 - Workspace creator is admin of general
 - All new members automatically join general
+
+### SECURITY DEFINER Function for Direct Messages
+
+New in this updated schema: a function that creates direct message conversations and handles participant creation in a single transaction.
+
+```sql
+CREATE OR REPLACE FUNCTION create_direct_message(
+  workspace_id_param UUID,
+  other_user_id_param UUID
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  new_conversation_id UUID;
+BEGIN
+  -- Check if caller is authenticated
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  -- Check if both users are members of the workspace
+  IF NOT EXISTS (
+    SELECT 1 FROM workspace_members
+    WHERE workspace_id = workspace_id_param
+    AND user_id IN (auth.uid(), other_user_id_param)
+    HAVING COUNT(*) = 2
+  ) THEN
+    RAISE EXCEPTION 'Both users must be workspace members';
+  END IF;
+
+  -- Check if a DM already exists between these users
+  IF EXISTS (
+    SELECT 1
+    FROM conversations c
+    JOIN conversation_participants p1 ON c.id = p1.conversation_id
+    JOIN conversation_participants p2 ON c.id = p2.conversation_id
+    WHERE c.workspace_id = workspace_id_param
+    AND c.type = 'direct'
+    AND p1.user_id = auth.uid()
+    AND p2.user_id = other_user_id_param
+  ) THEN
+    RAISE EXCEPTION 'Conversation already exists';
+  END IF;
+
+  -- Create the conversation
+  INSERT INTO conversations (workspace_id, type)
+  VALUES (workspace_id_param, 'direct')
+  RETURNING id INTO new_conversation_id;
+
+  -- Add both participants
+  INSERT INTO conversation_participants (conversation_id, user_id)
+  VALUES
+    (new_conversation_id, auth.uid()),
+    (new_conversation_id, other_user_id_param);
+
+  RETURN new_conversation_id;
+END;
+$$;
+```
+
+- SECURITY DEFINER bypasses RLS so the function can create conversations and participants
+- Handles uniqueness check, conversation creation, and participant creation in a single transaction
+- Returns the conversation ID for immediate redirection
+- Validates both users are workspace members
+- Prevents duplicate conversations between the same users
+
+Note: The previous `enforce_direct_dm_uniqueness` trigger has been removed in favor of this function-based approach.
+
+### Design Decisions
+
+#### Direct Message Creation
+- Uses a SECURITY DEFINER function for atomic operations
+- Enforces uniqueness at the function level rather than with triggers
+- Validates workspace membership before creation
+- Returns conversation ID for immediate client-side navigation
+
+### RLS Policies for Conversation Participants
+
+```sql
+-- Helper function to safely check conversation membership
+CREATE OR REPLACE FUNCTION public.user_in_conversation(
+  _user_id uuid,
+  _conversation_id uuid
+)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public      -- avoid custom search paths
+SET row_security = off        -- disable RLS checks inside function
+AS $$
+BEGIN
+  RETURN EXISTS(
+    SELECT 1
+    FROM conversation_participants
+    WHERE conversation_id = _conversation_id
+      AND user_id = _user_id
+  );
+END;
+$$;
+
+-- Enable RLS on conversation_participants table
+ALTER TABLE conversation_participants ENABLE ROW LEVEL SECURITY;
+
+-- Allow users to view their own participations
+CREATE POLICY "Users can view their own participations"
+ON conversation_participants FOR SELECT
+TO authenticated
+USING (
+  user_id = auth.uid()
+);
+
+-- Allow users to see other participants in conversations they're in
+CREATE POLICY "Users can view participants in convos they belong to"
+ON conversation_participants FOR SELECT
+TO authenticated
+USING (
+  user_in_conversation(auth.uid(), conversation_participants.conversation_id)
+);
+```
+
+The conversation participant policies are designed to:
+- Use a SECURITY DEFINER helper function to safely check conversation membership without recursion
+- Allow users to always see their own conversation participations
+- Allow users to see other participants in conversations they're part of
+- Avoid recursive policy checks by moving the participant lookup into a separate function with RLS disabled
+- Work with the SECURITY DEFINER function for creating conversations
+
+Note: Participant creation is handled by the `create_direct_message` SECURITY DEFINER function, so no explicit INSERT policy is needed.
 
 ## Final RLS and Real-time Configuration
 
