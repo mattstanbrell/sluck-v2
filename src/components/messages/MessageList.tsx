@@ -10,7 +10,7 @@ import { MessageContent } from "./MessageContent";
 import { MessageTimestamp } from "./MessageTimestamp";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { Button } from "@/components/ui/button";
-import { MessageCircle } from "lucide-react";
+import { MessageCircle, ListEnd } from "lucide-react";
 import type { Database } from "@/lib/database.types";
 
 /* ------------------ Types & Helpers ------------------ */
@@ -313,6 +313,7 @@ function ChainGroup({
 	const chainRef = useRef<HTMLDivElement>(null);
 	const [lineStyle, setLineStyle] = useState<CSSProperties>({});
 	const [isMounted, setIsMounted] = useState(false);
+	const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
 
 	useEffect(() => {
 		// Trigger mount animation after a small delay to ensure DOM is ready
@@ -370,6 +371,8 @@ function ChainGroup({
 			{/* 1) FIRST MESSAGE ROW (with avatar) */}
 			<div
 				className="-mx-8 px-8 group relative flex items-start gap-4 py-2 transition-colors"
+				onMouseEnter={() => setHoveredMessageId(firstMsg.id)}
+				onMouseLeave={() => setHoveredMessageId(null)}
 				style={
 					{
 						["--hover-bg" as string]:
@@ -396,13 +399,7 @@ function ChainGroup({
 					{showChainLine && (
 						<div
 							className="absolute left-1/2 top-10 w-0.5 -translate-x-1/2 transition-[height] duration-1000 ease-out"
-							style={{
-								height: lineStyle.height || "0px",
-								background: userProfile.avatar_color || "rgb(20, 148, 132)",
-								maskImage: "linear-gradient(to bottom, black, transparent)",
-								WebkitMaskImage:
-									"linear-gradient(to bottom, black, transparent)",
-							}}
+							style={lineStyle}
 						/>
 					)}
 				</div>
@@ -418,19 +415,26 @@ function ChainGroup({
 							className="ml-2"
 						/>
 					</div>
-					<div className="group/message">
+					<div className="relative">
 						<MessageContent content={firstMsg.content} />
-						{showThreadButton && onThreadClick && (
-							<Button
-								variant="ghost"
-								size="sm"
-								onClick={() => onThreadClick(firstMsg.id)}
-								className="mt-1 text-custom-text-secondary hover:text-custom-text opacity-60 hover:opacity-100 transition-opacity"
-							>
-								<MessageCircle className="h-4 w-4 mr-1" />
-								Reply in thread
-							</Button>
-						)}
+						{showThreadButton &&
+							onThreadClick &&
+							hoveredMessageId === firstMsg.id && (
+								<div
+									className="absolute -bottom-7 left-0 h-7 z-20 w-fit"
+									onMouseEnter={() => setHoveredMessageId(firstMsg.id)}
+								>
+									<Button
+										variant="ghost"
+										size="sm"
+										onClick={() => onThreadClick(firstMsg.id)}
+										className="text-custom-text-secondary hover:text-custom-text border border-custom-ui-medium backdrop-blur-sm bg-custom-background/80"
+									>
+										<ListEnd className="h-4 w-4 mr-1 -scale-x-100" />
+										Reply in thread
+									</Button>
+								</div>
+							)}
 					</div>
 				</div>
 			</div>
@@ -444,6 +448,8 @@ function ChainGroup({
 							key={m.id}
 							data-last-message={isLast ? true : undefined}
 							className="-mx-8 px-8 group relative py-1 transition-colors"
+							onMouseEnter={() => setHoveredMessageId(m.id)}
+							onMouseLeave={() => setHoveredMessageId(null)}
 							style={
 								{
 									["--hover-bg" as string]:
@@ -455,25 +461,30 @@ function ChainGroup({
 								className="absolute inset-0 opacity-0 group-hover:opacity-5 transition-opacity pointer-events-none"
 								style={{ backgroundColor: "var(--hover-bg)" }}
 							/>
-							{/* Shift message content to match avatar area */}
 							<div className="ml-[3.5rem]">
-								{/* Center the timestamp vertically with the message */}
 								<div className="absolute left-[3.5rem] top-0 bottom-0 -translate-x-1/2 flex items-center pr-2 opacity-0 group-hover:opacity-100">
 									<MessageTimestamp timestamp={m.created_at} hideColon />
 								</div>
-								<div className="group/message">
+								<div className="relative">
 									<MessageContent content={m.content} />
-									{showThreadButton && onThreadClick && (
-										<Button
-											variant="ghost"
-											size="sm"
-											onClick={() => onThreadClick(m.id)}
-											className="mt-1 text-custom-text-secondary hover:text-custom-text opacity-60 hover:opacity-100 transition-opacity"
-										>
-											<MessageCircle className="h-4 w-4 mr-1" />
-											Reply in thread
-										</Button>
-									)}
+									{showThreadButton &&
+										onThreadClick &&
+										hoveredMessageId === m.id && (
+											<div
+												className="absolute -bottom-7 left-0 h-7 z-20 w-fit"
+												onMouseEnter={() => setHoveredMessageId(m.id)}
+											>
+												<Button
+													variant="ghost"
+													size="sm"
+													onClick={() => onThreadClick(m.id)}
+													className="text-custom-text-secondary hover:text-custom-text border border-custom-ui-medium backdrop-blur-sm bg-custom-background/80"
+												>
+													<ListEnd className="h-4 w-4 mr-1 -scale-x-100" />
+													Reply in thread
+												</Button>
+											</div>
+										)}
 								</div>
 							</div>
 						</div>
