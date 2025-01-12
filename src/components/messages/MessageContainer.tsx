@@ -16,7 +16,7 @@ export function MessageContainer({
 
 	return (
 		<div className="flex h-full">
-			{/* Main message list */}
+			{/* Main message list - always rendered */}
 			<div
 				className={`flex flex-col ${selectedThreadId ? "flex-1" : "w-full"}`}
 			>
@@ -25,6 +25,7 @@ export function MessageContainer({
 						channelId={channelId}
 						conversationId={conversationId}
 						onThreadClick={setSelectedThreadId}
+						isMainView={true}
 					/>
 				</div>
 				<div className="shrink-0">

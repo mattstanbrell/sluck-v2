@@ -7,7 +7,8 @@ import { MessageInput } from "@/components/messages/MessageInput";
 import { MessageContent } from "@/components/messages/MessageContent";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { Button } from "@/components/ui/button";
-import { X } from "lucide-react";
+import { X, ListEnd } from "lucide-react";
+import { MessageTimestamp } from "./MessageTimestamp";
 import type { Database } from "@/lib/database.types";
 
 type Message = Database["public"]["Tables"]["messages"]["Row"] & {
@@ -76,26 +77,27 @@ export function ThreadPanel({
 	return (
 		<div
 			className={`
-        fixed inset-0 z-50 bg-custom-background border-l border-custom-ui-medium
-        sm:relative sm:w-[400px] sm:h-auto sm:z-auto
-      `}
+				fixed inset-0 z-50 bg-custom-background border-l border-custom-ui-medium flex flex-col
+				sm:relative sm:w-[400px] sm:h-auto sm:z-auto
+			`}
 		>
-			{/* Header */}
-			<div className="flex items-center justify-between p-4 border-b border-custom-ui-medium">
-				<h2 className="text-lg font-semibold text-custom-text">Thread</h2>
-				<Button
-					variant="ghost"
-					size="icon"
-					onClick={onClose}
-					className="text-custom-text-secondary hover:text-custom-text"
-				>
-					<X className="h-4 w-4" />
-				</Button>
-			</div>
-
-			{/* Parent Message */}
+			{/* Header with compact parent message */}
 			{parentMessage && (
-				<div className="border-b border-custom-ui-medium p-4">
+				<div className="shrink-0 p-4 border-b border-custom-ui-medium">
+					<div className="flex items-center justify-between mb-3">
+						<div className="flex items-center gap-2">
+							<ListEnd className="h-4 w-4 text-custom-text-secondary -scale-x-100" />
+							<span className="text-sm text-custom-text-secondary">Thread</span>
+						</div>
+						<Button
+							variant="ghost"
+							size="icon"
+							onClick={onClose}
+							className="text-custom-text-secondary hover:text-custom-text"
+						>
+							<X className="h-4 w-4" />
+						</Button>
+					</div>
 					<div className="flex items-start gap-3">
 						<UserAvatar
 							fullName={parentMessage.profile?.full_name || "User"}
@@ -113,6 +115,7 @@ export function ThreadPanel({
 									{parentMessage.profile?.display_name ||
 										parentMessage.profile?.full_name}
 								</span>
+								<MessageTimestamp timestamp={parentMessage.created_at} />
 							</div>
 							<MessageContent content={parentMessage.content} />
 						</div>
@@ -121,21 +124,21 @@ export function ThreadPanel({
 			)}
 
 			{/* Thread Messages */}
-			<div className="flex flex-col h-[calc(100%-200px)] sm:h-[500px]">
-				<div className="flex-1 overflow-y-auto">
-					<MessageList
-						channelId={channelId}
-						conversationId={conversationId}
-						parentId={selectedMessageId}
-					/>
-				</div>
-				<div className="shrink-0 border-t border-custom-ui-medium">
-					<MessageInput
-						channelId={channelId}
-						conversationId={conversationId}
-						parentId={selectedMessageId}
-					/>
-				</div>
+			<div className="flex-1 min-h-0 overflow-y-auto">
+				<MessageList
+					channelId={channelId}
+					conversationId={conversationId}
+					parentId={selectedMessageId}
+				/>
+			</div>
+
+			{/* Input */}
+			<div className="shrink-0 border-t border-custom-ui-medium">
+				<MessageInput
+					channelId={channelId}
+					conversationId={conversationId}
+					parentId={selectedMessageId}
+				/>
 			</div>
 		</div>
 	);

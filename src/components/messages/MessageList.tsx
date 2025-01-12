@@ -82,15 +82,22 @@ export function MessageList({
 	conversationId,
 	parentId,
 	onThreadClick,
+	isMainView,
 }: {
 	channelId?: string;
 	conversationId?: string;
 	parentId?: string;
 	onThreadClick?: (messageId: string) => void;
+	isMainView?: boolean;
 }) {
 	const [messages, setMessages] = useState<Message[]>([]);
 	const supabase = createClient();
 	const messagesEndRef = useRef<HTMLDivElement>(null);
+
+	// Debug effect to track message state changes
+	useEffect(() => {
+		console.log("[MessageList] Messages state updated:", messages.length);
+	}, [messages]);
 
 	// Ensure we scroll to bottom on new messages
 	const scrollToBottom = useCallback(() => {
@@ -105,7 +112,15 @@ export function MessageList({
 	useEffect(() => {
 		if (!channelId && !conversationId) return;
 
+		console.log("[MessageList] Setting up subscription", {
+			channelId,
+			conversationId,
+			parentId,
+			isMainView,
+		});
+
 		async function fetchMessages() {
+			console.log("[MessageList] Fetching initial messages");
 			const query = supabase
 				.from("messages")
 				.select(
@@ -130,15 +145,16 @@ export function MessageList({
 			// If parentId is provided, filter for thread messages
 			if (parentId) {
 				query.eq("parent_id", parentId);
-			} else {
+			} else if (isMainView) {
 				query.is("parent_id", null);
 			}
 
 			const { data, error } = await query;
 
 			if (error) {
-				console.warn("Error fetching messages:", error);
+				console.warn("[MessageList] Error fetching messages:", error);
 			} else if (data) {
+				console.log("[MessageList] Initial messages loaded:", data.length);
 				setMessages(data as Message[]);
 				scrollToBottom();
 			}
@@ -147,28 +163,60 @@ export function MessageList({
 		fetchMessages();
 
 		// Realtime subscription
+		console.log("[MessageList] Setting up subscription with NO filter", {
+			channelId,
+			conversationId,
+			parentId,
+			isMainView,
+		});
+
 		const channel = supabase
-			.channel("messages")
+			.channel(
+				`messages-${isMainView ? "main" : "thread"}-${channelId || conversationId}`,
+			)
 			.on(
 				"postgres_changes",
 				{
 					event: "INSERT",
 					schema: "public",
 					table: "messages",
-					filter: channelId
-						? `channel_id=eq.${channelId}`
-						: `conversation_id=eq.${conversationId}`,
 				},
 				async (payload) => {
-					// Skip messages that don't match our view context
+					console.log("[MessageList] Received ANY message:", {
+						messageId: payload.new.id,
+						channelId: payload.new.channel_id,
+						conversationId: payload.new.conversation_id,
+						parentId: payload.new.parent_id,
+						content: payload.new.content.slice(0, 50) + "...",
+						isMainView,
+					});
+
+					// Only process messages that match our view
 					if (parentId) {
-						if (payload.new.parent_id !== parentId) return;
-					} else {
-						if (payload.new.parent_id !== null) return;
+						if (payload.new.parent_id !== parentId) {
+							console.log("[MessageList] Skipping - wrong parent_id");
+							return;
+						}
+					} else if (isMainView) {
+						if (channelId && payload.new.channel_id !== channelId) {
+							console.log("[MessageList] Skipping - wrong channel_id");
+							return;
+						}
+						if (
+							conversationId &&
+							payload.new.conversation_id !== conversationId
+						) {
+							console.log("[MessageList] Skipping - wrong conversation_id");
+							return;
+						}
+						if (payload.new.parent_id !== null) {
+							console.log("[MessageList] Skipping - is a thread message");
+							return;
+						}
 					}
 
 					// Fetch the newly inserted message with its profile
-					const { data } = await supabase
+					const { data, error } = await supabase
 						.from("messages")
 						.select(
 							`
@@ -186,17 +234,50 @@ export function MessageList({
 						.eq("id", payload.new.id)
 						.single();
 
+					if (error) {
+						console.error(
+							"[MessageList] Error fetching new message details:",
+							error,
+						);
+						return;
+					}
+
 					if (data) {
-						setMessages((prev) => [...prev, data as Message]);
+						// Force a new array reference to ensure re-render
+						setMessages((prev) => {
+							console.log("[MessageList] Adding new message to state:", {
+								messageId: data.id,
+								content: data.content.slice(0, 50) + "...",
+								currentMessageCount: prev.length,
+								isMainView,
+							});
+
+							const newMessages = [...prev, data as Message];
+							console.log(
+								"[MessageList] New message count:",
+								newMessages.length,
+							);
+							return newMessages;
+						});
 					}
 				},
 			)
-			.subscribe();
+			.subscribe((status) => {
+				console.log("[MessageList] Subscription status:", status);
+			});
 
 		return () => {
+			console.log("[MessageList] Cleaning up subscription");
 			channel.unsubscribe();
 		};
-	}, [channelId, conversationId, parentId, supabase, scrollToBottom]);
+	}, [
+		channelId,
+		conversationId,
+		parentId,
+		supabase,
+		scrollToBottom,
+		isMainView,
+	]);
 
 	const getInitials = (name: string) =>
 		name
