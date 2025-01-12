@@ -106,7 +106,7 @@ export function MessageList({
 
 	useEffect(() => {
 		scrollToBottom();
-	}, [scrollToBottom, messages]);
+	}, [scrollToBottom]);
 
 	// Fetch & subscribe to messages
 	useEffect(() => {
@@ -187,7 +187,7 @@ export function MessageList({
 						channelId: payload.new.channel_id,
 						conversationId: payload.new.conversation_id,
 						parentId: payload.new.parent_id,
-						content: payload.new.content.slice(0, 50) + "...",
+						content: `${payload.new.content.slice(0, 50)}...`,
 						isMainView,
 					});
 
@@ -247,7 +247,7 @@ export function MessageList({
 						setMessages((prev) => {
 							console.log("[MessageList] Adding new message to state:", {
 								messageId: data.id,
-								content: data.content.slice(0, 50) + "...",
+								content: `${data.content.slice(0, 50)}...`,
 								currentMessageCount: prev.length,
 								isMainView,
 							});
@@ -279,24 +279,17 @@ export function MessageList({
 		isMainView,
 	]);
 
-	const getInitials = (name: string) =>
-		name
-			.split(" ")
-			.map((n) => n[0])
-			.join("")
-			.toUpperCase();
-
-	const groups = groupConsecutiveMessages(messages);
+	// Group messages into chains
+	const messageGroups = groupConsecutiveMessages(messages);
 
 	return (
-		<div className="flex flex-col px-8 py-4 overflow-x-hidden">
-			{groups.map((chain) => (
+		<div className="flex flex-col gap-4 p-4">
+			{messageGroups.map((chain, i) => (
 				<ChainGroup
-					key={`${chain.userId}-${chain.messages[0].id}`}
+					key={`chain-${chain.userId}-${i}`}
 					chain={chain}
-					getInitials={getInitials}
 					onThreadClick={onThreadClick}
-					showThreadButton={!parentId}
+					showThreadButton={isMainView}
 				/>
 			))}
 			<div ref={messagesEndRef} />
@@ -307,12 +300,10 @@ export function MessageList({
 /* ------------- The ChainGroup Component ------------- */
 function ChainGroup({
 	chain,
-	getInitials,
 	onThreadClick,
 	showThreadButton,
 }: {
 	chain: { userId: string; messages: Message[] };
-	getInitials: (name: string) => string;
 	onThreadClick?: (messageId: string) => void;
 	showThreadButton?: boolean;
 }) {
@@ -359,7 +350,7 @@ function ChainGroup({
 			WebkitMaskImage: "linear-gradient(to bottom, black, transparent)",
 			transition: "height 1s ease-out",
 		});
-	}, [showChainLine, userProfile.avatar_color, isMounted, messages.length]);
+	}, [showChainLine, userProfile.avatar_color, isMounted]);
 
 	return (
 		<div ref={chainRef} className="mt-6 space-y-0.5">

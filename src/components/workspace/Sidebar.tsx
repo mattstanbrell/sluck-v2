@@ -212,7 +212,7 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 	}, [workspaceId, supabase]);
 
 	// Get display name in order of preference: display_name -> full_name -> 'User'
-	const displayName = profile?.display_name || profile?.full_name || "User";
+	// const displayName = profile?.display_name || profile?.full_name || "User";
 
 	return (
 		<div className="w-64 bg-custom-background-secondary border-r border-custom-ui-medium flex flex-col">

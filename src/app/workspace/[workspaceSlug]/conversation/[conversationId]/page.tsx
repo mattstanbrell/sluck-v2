@@ -10,16 +10,6 @@ type Profile = {
 	avatar_cache: string | null;
 };
 
-type ConversationParticipant = {
-	user_id: string;
-	profiles: Profile;
-};
-
-type ConversationResponse = {
-	id: string;
-	conversation_participants: ConversationParticipant[];
-};
-
 type DatabaseConversation = {
 	id: string;
 	conversation_participants: {

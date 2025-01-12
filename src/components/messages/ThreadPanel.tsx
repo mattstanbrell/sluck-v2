@@ -38,12 +38,6 @@ export function ThreadPanel({
 	const supabase = createClient();
 	const [parentMessage, setParentMessage] = useState<Message | null>(null);
 
-	// If there's no thread selected, hide the panel
-	if (!selectedMessageId) {
-		return null;
-	}
-
-	// Load the parent message
 	useEffect(() => {
 		async function fetchParent() {
 			const { data, error } = await supabase
@@ -72,7 +66,15 @@ export function ThreadPanel({
 		if (selectedMessageId) {
 			fetchParent();
 		}
+		return () => {
+			setParentMessage(null);
+		};
 	}, [selectedMessageId, supabase]);
+
+	// If there's no thread selected, hide the panel
+	if (!selectedMessageId) {
+		return null;
+	}
 
 	return (
 		<div
