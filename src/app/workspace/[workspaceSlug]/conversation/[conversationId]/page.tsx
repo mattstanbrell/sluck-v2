@@ -129,7 +129,7 @@ export default async function ConversationPage({
 					/>
 					<h1 className="font-semibold">{displayName}</h1>
 				</div>
-				<div className="mx-4 border-t border-custom-ui-medium" />
+				<div className="border-t border-custom-ui-medium" />
 			</div>
 
 			{/* Messages */}

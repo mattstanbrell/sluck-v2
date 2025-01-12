@@ -20,6 +20,7 @@ export function MessageInput({
 }) {
 	const [content, setContent] = useState("");
 	const [isSubmitting, setIsSubmitting] = useState(false);
+	const [isResizing, setIsResizing] = useState(false);
 	const supabase = createClient();
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
@@ -44,8 +45,11 @@ export function MessageInput({
 		};
 
 		const handleMouseUp = () => {
+			if (!isResizingRef.current) return;
 			isResizingRef.current = false;
-			document.documentElement.style.userSelect = "";
+			setIsResizing(false);
+			document.body.classList.remove("select-none");
+			document.body.classList.remove("resizing");
 		};
 
 		document.addEventListener("mousemove", handleMouseMove);
@@ -54,15 +58,19 @@ export function MessageInput({
 		return () => {
 			document.removeEventListener("mousemove", handleMouseMove);
 			document.removeEventListener("mouseup", handleMouseUp);
+			document.body.classList.remove("select-none");
+			document.body.classList.remove("resizing");
 		};
 	}, []);
 
 	const handleResizeStart = (e: React.MouseEvent) => {
 		if (!containerRef.current) return;
 		isResizingRef.current = true;
+		setIsResizing(true);
 		startHeightRef.current = containerRef.current.offsetHeight;
 		startYRef.current = e.clientY;
-		document.documentElement.style.userSelect = "none";
+		document.body.classList.add("select-none");
+		document.body.classList.add("resizing");
 	};
 
 	const insertMarkdown = (prefix: string, suffix: string = prefix) => {
@@ -123,7 +131,7 @@ export function MessageInput({
 				channelId,
 				conversationId,
 				parentId,
-				content: content.slice(0, 50) + "...",
+				content: `${content.slice(0, 50)}...`,
 			});
 
 			// Get the current user
@@ -157,7 +165,7 @@ export function MessageInput({
 
 			console.log("[MessageInput] Message sent successfully:", {
 				messageId: data.id,
-				content: data.content.slice(0, 50) + "...",
+				content: `${data.content.slice(0, 50)}...`,
 			});
 
 			// Update conversation's last_message_at if it's a DM
@@ -190,7 +198,7 @@ export function MessageInput({
 		<form onSubmit={handleSubmit} className="relative">
 			<div
 				ref={containerRef}
-				className="min-h-[144px] max-h-[50vh] border-t border-custom-ui-medium relative bg-custom-background-secondary"
+				className={`min-h-[144px] max-h-[50vh] border-t border-custom-ui-medium relative bg-custom-background-secondary ${isResizing ? "select-none" : ""}`}
 				style={{ height: "144px" }}
 			>
 				<div

@@ -323,33 +323,47 @@ function ChainGroup({
 		return () => clearTimeout(timer);
 	}, []);
 
-	useLayoutEffect(() => {
+	useEffect(() => {
 		if (!showChainLine || !chainRef.current) return;
 
-		const chainRect = chainRef.current.getBoundingClientRect();
-		const startY = chainRect.top + 40; // Avatar offset
+		const updateLineHeight = () => {
+			const chainRect = chainRef.current?.getBoundingClientRect();
+			if (!chainRect) return;
 
-		const lastDiv = chainRef.current.querySelector("[data-last-message]");
-		if (!lastDiv) {
-			setLineStyle({ display: "none" });
-			return;
-		}
-		const lastRect = (lastDiv as HTMLElement).getBoundingClientRect();
-		const lastBottom = lastRect.bottom;
+			const startY = chainRect.top + 40; // Avatar offset
 
-		const totalHeight = lastBottom - startY;
-		if (totalHeight <= 0) {
-			setLineStyle({ display: "none" });
-			return;
-		}
+			const lastDiv = chainRef.current?.querySelector("[data-last-message]");
+			if (!lastDiv) {
+				setLineStyle({ display: "none" });
+				return;
+			}
+			const lastRect = (lastDiv as HTMLElement).getBoundingClientRect();
+			const lastBottom = lastRect.bottom;
 
-		setLineStyle({
-			height: isMounted ? `${totalHeight}px` : "0px",
-			background: userProfile.avatar_color || "rgb(20, 148, 132)",
-			maskImage: "linear-gradient(to bottom, black, transparent)",
-			WebkitMaskImage: "linear-gradient(to bottom, black, transparent)",
-			transition: "height 1s ease-out",
-		});
+			const totalHeight = lastBottom - startY;
+			if (totalHeight <= 0) {
+				setLineStyle({ display: "none" });
+				return;
+			}
+
+			setLineStyle({
+				height: isMounted ? `${totalHeight}px` : "0px",
+				background: userProfile.avatar_color || "rgb(20, 148, 132)",
+				maskImage: "linear-gradient(to bottom, black, transparent)",
+				WebkitMaskImage: "linear-gradient(to bottom, black, transparent)",
+			});
+		};
+
+		// Initial calculation
+		updateLineHeight();
+
+		// Set up ResizeObserver
+		const resizeObserver = new ResizeObserver(updateLineHeight);
+		resizeObserver.observe(chainRef.current);
+
+		return () => {
+			resizeObserver.disconnect();
+		};
 	}, [showChainLine, userProfile.avatar_color, isMounted]);
 
 	return (
@@ -382,8 +396,14 @@ function ChainGroup({
 					{/* Chain line */}
 					{showChainLine && (
 						<div
-							className="absolute left-1/2 top-10 w-0.5 -translate-x-1/2"
-							style={lineStyle}
+							className="absolute left-1/2 top-10 w-0.5 -translate-x-1/2 transition-[height] duration-1000 ease-out"
+							style={{
+								height: lineStyle.height || "0px",
+								background: userProfile.avatar_color || "rgb(20, 148, 132)",
+								maskImage: "linear-gradient(to bottom, black, transparent)",
+								WebkitMaskImage:
+									"linear-gradient(to bottom, black, transparent)",
+							}}
 						/>
 					)}
 				</div>

@@ -40,7 +40,7 @@ export default async function ChannelPage({
 				<div className="px-4 py-[18px] flex items-center">
 					<h1 className="font-semibold">{channel.name}</h1>
 				</div>
-				<div className="mx-4 border-t border-custom-ui-medium" />
+				<div className="border-t border-custom-ui-medium" />
 			</div>
 
 			{/* Messages */}
