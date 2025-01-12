@@ -17,9 +17,7 @@ export function MessageContainer({
 	return (
 		<div className="flex h-full">
 			{/* Main message list - always rendered */}
-			<div
-				className={`flex flex-col ${selectedThreadId ? "flex-1" : "w-full"}`}
-			>
+			<div className="flex flex-col flex-1 min-w-0">
 				<div className="flex-1 overflow-y-auto min-h-0">
 					<MessageList
 						channelId={channelId}
