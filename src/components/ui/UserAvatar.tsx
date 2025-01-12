@@ -11,7 +11,7 @@ interface UserAvatarProps {
 	avatarCache?: string | null;
 	avatarColor?: string | null;
 	className?: string;
-	size?: number;
+	size?: "xs" | "sm" | "md" | "lg" | "xl";
 }
 
 export function UserAvatar({
@@ -21,11 +21,20 @@ export function UserAvatar({
 	avatarCache,
 	avatarColor = "rgb(20, 148, 132)", // Default teal color
 	className,
-	size = 10, // Default size is 10 (40px)
+	size = "md", // Default size is medium
 }: UserAvatarProps) {
 	const [resolvedSrc, setResolvedSrc] = useState<string | undefined>(undefined);
 	const fallbackName = displayName || fullName || "User";
 	const resolvedColor = avatarColor || "rgb(20, 148, 132)";
+
+	// Size mappings
+	const sizeClasses = {
+		xs: "h-6 w-6",
+		sm: "h-8 w-8",
+		md: "h-10 w-10",
+		lg: "h-12 w-12",
+		xl: "h-14 w-14",
+	};
 
 	useEffect(() => {
 		if (!avatarUrl) {
@@ -62,7 +71,7 @@ export function UserAvatar({
 
 	return (
 		<Avatar
-			className={cn(`w-${size} h-${size} rounded-xl`, className)}
+			className={cn(sizeClasses[size], "rounded-xl", className)}
 			style={{ "--avatar-color": resolvedColor } as CSSProperties}
 		>
 			<AvatarImage src={resolvedSrc} alt={fallbackName} />

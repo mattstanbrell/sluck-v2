@@ -125,7 +125,7 @@ export default async function ConversationPage({
 						displayName={otherParticipant.display_name}
 						avatarUrl={otherParticipant.avatar_url}
 						avatarCache={otherParticipant.avatar_cache}
-						size={6}
+						size="xs"
 					/>
 					<h1 className="font-semibold">{displayName}</h1>
 				</div>

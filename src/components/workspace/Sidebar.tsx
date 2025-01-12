@@ -309,7 +309,7 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 										displayName={conversation.participant.profiles.display_name}
 										avatarUrl={conversation.participant.profiles.avatar_url}
 										avatarCache={conversation.participant.profiles.avatar_cache}
-										size={8}
+										size="sm"
 										className="mr-2"
 									/>
 									<span className="truncate">{displayName}</span>
@@ -329,7 +329,7 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 						displayName={profile?.display_name}
 						avatarUrl={profile?.avatar_url}
 						avatarCache={profile?.avatar_cache}
-						size={8}
+						size="sm"
 					/>
 					<Button
 						variant="ghost"

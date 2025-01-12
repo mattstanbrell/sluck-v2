@@ -109,7 +109,7 @@ export function ThreadPanel({
 							avatarColor={
 								parentMessage.profile?.avatar_color || "rgb(20, 148, 132)"
 							}
-							size={8}
+							size="md"
 						/>
 						<div className="flex-1 min-w-0">
 							<div className="flex items-baseline gap-2">

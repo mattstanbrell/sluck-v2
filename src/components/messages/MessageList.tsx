@@ -376,7 +376,7 @@ function ChainGroup({
 						avatarUrl={userProfile.avatar_url}
 						avatarCache={userProfile.avatar_cache}
 						avatarColor={userProfile.avatar_color || "rgb(20, 148, 132)"}
-						size={10}
+						size="md"
 					/>
 
 					{/* Chain line */}

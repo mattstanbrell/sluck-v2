@@ -273,7 +273,7 @@ export function CreateDirectMessageDialog({
 										displayName={user.display_name}
 										avatarUrl={user.avatar_url}
 										avatarCache={user.avatar_cache}
-										size={8}
+										size="sm"
 									/>
 									<span className="text-sm text-custom-text">
 										{displayName}
