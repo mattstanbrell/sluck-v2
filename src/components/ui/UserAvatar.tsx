@@ -29,11 +29,11 @@ export function UserAvatar({
 
 	// Size mappings
 	const sizeClasses = {
-		xs: "h-6 w-6",
-		sm: "h-8 w-8",
-		md: "h-10 w-10",
-		lg: "h-12 w-12",
-		xl: "h-14 w-14",
+		xs: "h-6 w-6 rounded-lg",
+		sm: "h-8 w-8 rounded-xl",
+		md: "h-10 w-10 rounded-xl",
+		lg: "h-12 w-12 rounded-xl",
+		xl: "h-14 w-14 rounded-xl",
 	};
 
 	useEffect(() => {
@@ -71,7 +71,7 @@ export function UserAvatar({
 
 	return (
 		<Avatar
-			className={cn(sizeClasses[size], "rounded-xl", className)}
+			className={cn(sizeClasses[size], className)}
 			style={{ "--avatar-color": resolvedColor } as CSSProperties}
 		>
 			<AvatarImage src={resolvedSrc} alt={fallbackName} />
