@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/utils/supabase/server";
+import type { DatabaseFile } from "@/types/message";
 
 export async function attachFileToMessage(
 	messageId: string,
@@ -8,7 +9,7 @@ export async function attachFileToMessage(
 	fileName: string,
 	fileType: string,
 	fileSize: number,
-) {
+): Promise<DatabaseFile> {
 	const supabase = await createClient();
 
 	// Get the current user

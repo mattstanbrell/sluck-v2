@@ -1,27 +1,15 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/utils/supabase/client";
-import { MessageList } from "@/components/messages/MessageList";
-import { MessageInput } from "@/components/messages/MessageInput";
-import { MessageContent } from "@/components/messages/MessageContent";
-import { UserAvatar } from "@/components/ui/UserAvatar";
+import type { Message } from "@/types/message";
+import { MessageContent } from "./MessageContent";
+import { MessageTimestamp } from "./MessageTimestamp";
+import { UserAvatar } from "../ui/UserAvatar";
 import { Button } from "@/components/ui/button";
 import { X, ListEnd } from "lucide-react";
-import { MessageTimestamp } from "./MessageTimestamp";
-import type { Database } from "@/lib/database.types";
-
-type Message = Database["public"]["Tables"]["messages"]["Row"] & {
-	profile: {
-		id: string;
-		full_name: string | null;
-		display_name: string | null;
-		avatar_url: string | null;
-		avatar_color: string | null;
-		avatar_cache: string | null;
-	};
-	files?: Database["public"]["Tables"]["files"]["Row"][];
-};
+import { MessageList } from "./MessageList";
+import { MessageInput } from "./MessageInput";
 
 interface ThreadPanelProps {
 	selectedMessageId: string | null;

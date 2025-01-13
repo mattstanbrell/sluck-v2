@@ -1,3 +1,4 @@
+import { useEffect, useState, useRef } from "react";
 import {
 	FileText,
 	FileVideo,
@@ -5,37 +6,29 @@ import {
 	FileImage,
 	RefreshCw,
 } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
 import { useFileUrl } from "@/hooks/useFileUrl";
 import Image from "next/image";
+import type { DatabaseFile } from "@/types/file";
 
 interface FileAttachmentProps {
-	fileUrl: string;
-	fileName: string;
-	fileType: string;
-	fileSize: number;
+	file: DatabaseFile;
 }
 
-export function FileAttachment({
-	fileUrl,
-	fileName,
-	fileType,
-	fileSize,
-}: FileAttachmentProps) {
+export function FileAttachment({ file }: FileAttachmentProps) {
 	const [isImageLoading, setIsImageLoading] = useState(true);
-	const { url, error, isLoading, getUrl } = useFileUrl(fileUrl);
+	const { url, error, isLoading, getUrl } = useFileUrl(file.file_url);
 	const mediaErrorRef = useRef<boolean>(false);
 
 	// Load URL on mount for media files
 	useEffect(() => {
 		if (
-			fileType.startsWith("image/") ||
-			fileType.startsWith("video/") ||
-			fileType.startsWith("audio/")
+			file.file_type.startsWith("image/") ||
+			file.file_type.startsWith("video/") ||
+			file.file_type.startsWith("audio/")
 		) {
 			getUrl();
 		}
-	}, [fileType, getUrl]);
+	}, [file.file_type, getUrl]);
 
 	// Helper to format file size
 	const formatFileSize = (bytes: number) => {
@@ -45,9 +38,9 @@ export function FileAttachment({
 	};
 
 	// Get file type category
-	const isImage = fileType.startsWith("image/");
-	const isVideo = fileType.startsWith("video/");
-	const isAudio = fileType.startsWith("audio/");
+	const isImage = file.file_type.startsWith("image/");
+	const isVideo = file.file_type.startsWith("video/");
+	const isAudio = file.file_type.startsWith("audio/");
 
 	// Handle media errors (expired URLs)
 	const handleMediaError = async () => {
@@ -93,7 +86,7 @@ export function FileAttachment({
 					{url ? (
 						<Image
 							src={url}
-							alt={fileName}
+							alt={file.file_name || ""}
 							width={800}
 							height={600}
 							className={`rounded-md max-h-96 object-contain transition-opacity duration-200 ${
@@ -111,8 +104,8 @@ export function FileAttachment({
 				</div>
 				<div className="flex items-center gap-1 mt-1 text-xs text-custom-text-secondary">
 					<FileImage className="w-3 h-3" />
-					<span>{fileName}</span>
-					<span>({formatFileSize(fileSize)})</span>
+					<span>{file.file_name}</span>
+					<span>({formatFileSize(file.file_size)})</span>
 				</div>
 			</div>
 		);
@@ -133,14 +126,14 @@ export function FileAttachment({
 							className="rounded-md max-h-96 bg-black"
 							onError={handleMediaError}
 						>
-							<source src={url || ""} type={fileType} />
+							<source src={url || ""} type={file.file_type} />
 							<track kind="captions" />
 							Your browser does not support the video tag.
 						</video>
 						<div className="flex items-center gap-1 mt-1 text-xs text-custom-text-secondary">
 							<FileVideo className="w-3 h-3" />
-							<span>{fileName}</span>
-							<span>({formatFileSize(fileSize)})</span>
+							<span>{file.file_name}</span>
+							<span>({formatFileSize(file.file_size)})</span>
 						</div>
 					</>
 				)}
@@ -159,14 +152,14 @@ export function FileAttachment({
 				) : (
 					<>
 						<audio controls className="w-full" onError={handleMediaError}>
-							<source src={url || ""} type={fileType} />
+							<source src={url || ""} type={file.file_type} />
 							<track kind="captions" />
 							Your browser does not support the audio tag.
 						</audio>
 						<div className="flex items-center gap-1 mt-1 text-xs text-custom-text-secondary">
 							<FileAudio className="w-3 h-3" />
-							<span>{fileName}</span>
-							<span>({formatFileSize(fileSize)})</span>
+							<span>{file.file_name}</span>
+							<span>({formatFileSize(file.file_size)})</span>
 						</div>
 					</>
 				)}
@@ -180,13 +173,13 @@ export function FileAttachment({
 			type="button"
 			onClick={handleFileClick}
 			className="inline-flex items-center gap-2 p-3 rounded-md bg-custom-background-secondary hover:bg-custom-ui-faint transition-colors"
-			aria-label={`Open ${fileName} in new tab`}
+			aria-label={`Open ${file.file_name} in new tab`}
 		>
 			<FileText className="w-4 h-4 text-custom-text-secondary" />
 			<div>
-				<span className="text-sm text-custom-text">{fileName}</span>
+				<span className="text-sm text-custom-text">{file.file_name}</span>
 				<span className="text-xs text-custom-text-secondary ml-2">
-					({formatFileSize(fileSize)})
+					({formatFileSize(file.file_size)})
 				</span>
 			</div>
 		</button>

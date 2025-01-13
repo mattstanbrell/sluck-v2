@@ -15,7 +15,6 @@ import {
 	X,
 	MoreHorizontal,
 } from "lucide-react";
-import type { Database } from "@/lib/database.types";
 import { useFileUpload } from "@/hooks/useFileUpload";
 import { useDropzone } from "react-dropzone";
 import { Alert } from "@/components/ui/Alert";
@@ -25,22 +24,22 @@ import {
 	PopoverTrigger,
 } from "@/components/ui/popover";
 
-type MessageInsert = Database["public"]["Tables"]["messages"]["Insert"];
-
 // Add a helper function to generate a unique key for files
 const generateFileKey = (file: File, index: number) => {
 	return `${file.name}-${file.size}-${index}`;
 };
 
+interface MessageInputProps {
+	channelId?: string;
+	conversationId?: string;
+	parentId?: string;
+}
+
 export function MessageInput({
 	channelId,
 	conversationId,
 	parentId,
-}: {
-	channelId?: string;
-	conversationId?: string;
-	parentId?: string;
-}) {
+}: MessageInputProps) {
 	const [content, setContent] = useState("");
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [isResizing, setIsResizing] = useState(false);
@@ -174,7 +173,6 @@ export function MessageInput({
 		let messageId: string | null = null;
 
 		try {
-			// Get the current user
 			const {
 				data: { user },
 				error: userError,
@@ -182,18 +180,16 @@ export function MessageInput({
 			if (userError) throw userError;
 			if (!user) throw new Error("Not authenticated");
 
-			const messageData: MessageInsert = {
-				content: content.trim(),
-				channel_id: channelId,
-				conversation_id: conversationId,
-				parent_id: parentId,
-				user_id: user.id,
-			};
-
 			// Insert the message first
 			const { data: message, error: messageError } = await supabase
 				.from("messages")
-				.insert(messageData)
+				.insert({
+					content: content.trim(),
+					channel_id: channelId ?? null,
+					conversation_id: conversationId ?? null,
+					parent_id: parentId ?? null,
+					user_id: user.id,
+				})
 				.select()
 				.single();
 
@@ -238,7 +234,6 @@ export function MessageInput({
 			);
 		} finally {
 			setIsSubmitting(false);
-			textareaRef.current?.focus();
 		}
 	};
 

@@ -15,14 +15,9 @@ import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { RefreshCw } from "lucide-react";
+import type { ProfileWithId } from "@/types/profile";
 
-interface UserProfile {
-	id: string;
-	full_name: string;
-	display_name: string | null;
-	avatar_url: string | null;
-	avatar_cache: string | null;
-}
+type UserProfile = ProfileWithId;
 
 interface CreateDirectMessageDialogProps {
 	workspaceId: string;

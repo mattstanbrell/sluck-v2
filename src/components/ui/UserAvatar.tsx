@@ -3,16 +3,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
-
-interface UserAvatarProps {
-	fullName: string | null;
-	displayName?: string | null;
-	avatarUrl?: string | null;
-	avatarCache?: string | null;
-	avatarColor?: string | null;
-	className?: string;
-	size?: "2xs" | "xs" | "sm" | "md" | "lg" | "xl";
-}
+import { UserAvatarProps } from "@/types/profile";
 
 export function UserAvatar({
 	fullName,

@@ -9,54 +9,21 @@ import { CreateChannelDialog } from "./CreateChannelDialog";
 import { WorkspaceSettingsDialog } from "./WorkspaceSettingsDialog";
 import { CreateDirectMessageDialog } from "./CreateDirectMessageDialog";
 import { UserAvatar } from "@/components/ui/UserAvatar";
+import type { ProfileDisplay } from "@/types/profile";
+import type {
+	ConversationWithParticipants,
+	ConversationWithParticipant,
+} from "@/types/conversation";
+import type { ChannelBasic } from "@/types/channel";
+import type { WorkspaceBasic } from "@/types/workspace";
 
-interface WorkspaceData {
-	name: string;
-	slug: string;
-}
-
-interface Channel {
-	id: string;
-	name: string;
-	slug: string;
-}
-
-type ConversationResponse = {
-	id: string;
-	conversation_participants: {
-		user_id: string;
-		profiles: {
-			full_name: string;
-			display_name: string | null;
-			avatar_url: string | null;
-			avatar_cache: string | null;
-		};
-	}[];
-};
-
-interface Conversation {
-	id: string;
-	participant: {
-		user_id: string;
-		profiles: {
-			full_name: string;
-			display_name: string | null;
-			avatar_url: string | null;
-			avatar_cache: string | null;
-		};
-	};
-}
-
-interface UserProfile {
-	full_name: string;
-	display_name: string | null;
-	avatar_url: string | null;
-	avatar_cache: string | null;
-}
+type ConversationResponse = ConversationWithParticipants;
+type Conversation = ConversationWithParticipant;
+type UserProfile = ProfileDisplay;
 
 export function Sidebar({ workspaceId }: { workspaceId: string }) {
-	const [workspace, setWorkspace] = useState<WorkspaceData | null>(null);
-	const [channels, setChannels] = useState<Channel[]>([]);
+	const [workspace, setWorkspace] = useState<WorkspaceBasic | null>(null);
+	const [channels, setChannels] = useState<ChannelBasic[]>([]);
 	const [conversations, setConversations] = useState<Conversation[]>([]);
 	const [profile, setProfile] = useState<UserProfile | null>(null);
 	const supabase = createClient();
@@ -74,16 +41,25 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 			// Load workspace
 			const { data: workspace } = await supabase
 				.from("workspaces")
-				.select("name, slug")
+				.select("id, name, slug, description")
 				.eq("id", workspaceId)
 				.single();
 
 			// Load channels
-			const { data: channels } = await supabase
+			const { data: channelsData, error: channelsError } = await supabase
 				.from("channels")
-				.select("id, name, slug")
+				.select("id, name, slug, description")
 				.eq("workspace_id", workspaceId)
 				.order("name");
+
+			if (channelsError) {
+				console.error("[Sidebar] Error fetching channels:", channelsError);
+				return;
+			}
+
+			if (channelsData) {
+				setChannels(channelsData);
+			}
 
 			// Load conversations
 			const { data: conversations } = await supabase
@@ -126,7 +102,6 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 				.single();
 
 			setWorkspace(workspace);
-			setChannels(channels || []);
 			setConversations(transformedConversations || []);
 			setProfile(profile);
 

@@ -1,64 +1,19 @@
-import {
-	useEffect,
-	useRef,
-	useState,
-	useCallback,
-	useMemo,
-	type CSSProperties,
-} from "react";
+import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { createClient } from "@/utils/supabase/client";
+import type {
+	Message,
+	MessageGroup,
+	MessagePayload,
+	MessageInsertPayload,
+} from "@/types/message";
 import { MessageContent } from "./MessageContent";
 import { MessageTimestamp } from "./MessageTimestamp";
-import { UserAvatar } from "@/components/ui/UserAvatar";
+import { UserAvatar } from "../ui/UserAvatar";
 import { Button } from "@/components/ui/button";
 import { ListEnd } from "lucide-react";
-import type { Database } from "@/lib/database.types";
 import { ThreadRepliesIndicator } from "./ThreadRepliesIndicator";
 
-/* ------------------ Types & Helpers ------------------ */
-
-type Message = Database["public"]["Tables"]["messages"]["Row"] & {
-	profile: {
-		id: string;
-		full_name: string | null;
-		display_name: string | null;
-		avatar_url: string | null;
-		avatar_color: string | null;
-		avatar_cache: string | null;
-	};
-	reply_count: number;
-	reply_user_ids: string[];
-	files: {
-		id: string;
-		file_type: string | null;
-		file_name: string | null;
-		file_size: number | null;
-		file_url: string;
-	}[];
-};
-
-type MessageGroup = {
-	userId: string;
-	messages: Message[];
-};
-
-type MessagePayload = {
-	new: {
-		id: string;
-		reply_count: number;
-	};
-};
-
-type MessageInsertPayload = {
-	new: {
-		id: string;
-		channel_id: string | null;
-		conversation_id: string | null;
-		parent_id: string | null;
-		user_id: string;
-		content: string;
-	};
-};
+const supabase = createClient();
 
 /**
  * Group consecutive messages from the same user
@@ -104,8 +59,6 @@ function groupConsecutiveMessages(messages: Message[]): MessageGroup[] {
 
 	return groups;
 }
-
-const supabase = createClient();
 
 export function MessageList({
 	channelId,
@@ -444,7 +397,7 @@ function ChainGroup({
 	const userProfile = firstMsg.profile;
 	const showChainLine = messages.length > 1;
 	const chainRef = useRef<HTMLDivElement>(null);
-	const [lineStyle, setLineStyle] = useState<CSSProperties>({});
+	const [lineStyle, setLineStyle] = useState<React.CSSProperties>({});
 	const [isMounted, setIsMounted] = useState(false);
 	const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
 
@@ -528,7 +481,7 @@ function ChainGroup({
 					{
 						["--hover-bg" as string]:
 							userProfile.avatar_color || "rgb(20, 148, 132)",
-					} as CSSProperties
+					} as React.CSSProperties
 				}
 			>
 				<div

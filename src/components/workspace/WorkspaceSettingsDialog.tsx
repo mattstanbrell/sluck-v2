@@ -13,12 +13,7 @@ import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/utils/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { generateWorkspaceInvite } from "@/app/actions/workspace";
-
-interface WorkspaceInviteData {
-	invite_code: string | null;
-	invite_expires_at: string | null;
-	invite_is_revoked: boolean;
-}
+import type { WorkspaceWithInvite } from "@/types/workspace";
 
 export function WorkspaceSettingsDialog({
 	workspaceId,
@@ -27,7 +22,7 @@ export function WorkspaceSettingsDialog({
 	const [open, setOpen] = useState(false);
 	const [isLoading, setIsLoading] = useState(false);
 	const [isLoadingInitial, setIsLoadingInitial] = useState(true);
-	const [inviteData, setInviteData] = useState<WorkspaceInviteData | null>(
+	const [inviteData, setInviteData] = useState<WorkspaceWithInvite | null>(
 		null,
 	);
 	const [copyConfirm, setCopyConfirm] = useState(false);
@@ -37,7 +32,9 @@ export function WorkspaceSettingsDialog({
 	const loadInviteData = useCallback(async () => {
 		const { data, error } = await supabase
 			.from("workspaces")
-			.select("invite_code, invite_expires_at, invite_is_revoked")
+			.select(
+				"id, name, slug, description, invite_code, invite_expires_at, invite_is_revoked",
+			)
 			.eq("id", workspaceId)
 			.single();
 

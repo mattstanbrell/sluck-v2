@@ -2,21 +2,9 @@ import { createClient } from "@/utils/supabase/server";
 import { notFound } from "next/navigation";
 import { MessageContainer } from "@/components/messages/MessageContainer";
 import { UserAvatar } from "@/components/ui/UserAvatar";
+import type { ConversationWithParticipants } from "@/types/conversation";
 
-type Profile = {
-	full_name: string;
-	display_name: string | null;
-	avatar_url: string | null;
-	avatar_cache: string | null;
-};
-
-type DatabaseConversation = {
-	id: string;
-	conversation_participants: {
-		user_id: string;
-		profiles: Profile;
-	}[];
-};
+type DatabaseConversation = ConversationWithParticipants;
 
 export default async function ConversationPage({
 	params,

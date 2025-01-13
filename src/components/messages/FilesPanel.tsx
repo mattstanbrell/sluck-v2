@@ -12,21 +12,7 @@ import {
 	FileAudio,
 	File,
 } from "lucide-react";
-
-type FileType = {
-	id: string;
-	file_name: string;
-	file_type: string;
-	file_size: number;
-	file_url: string;
-	created_at: string;
-	message: {
-		profile: {
-			full_name: string;
-			display_name: string | null;
-		};
-	};
-};
+import type { FileWithMessage } from "@/types/file";
 
 interface FilesPanelProps {
 	channelId: string;
@@ -35,7 +21,7 @@ interface FilesPanelProps {
 
 export function FilesPanel({ channelId, onClose }: FilesPanelProps) {
 	const supabase = createClient();
-	const [files, setFiles] = useState<FileType[]>([]);
+	const [files, setFiles] = useState<FileWithMessage[]>([]);
 	const [width, setWidth] = useState(400);
 	const [isResizing, setIsResizing] = useState(false);
 	const isResizingRef = useRef(false);
@@ -73,6 +59,7 @@ export function FilesPanel({ channelId, onClose }: FilesPanelProps) {
 					.filter((file) => file.message?.profile) // Only include files with valid message and profile
 					.map((file) => ({
 						id: file.id,
+						message_id: file.message_id,
 						file_name: file.file_name,
 						file_type: file.file_type,
 						file_size: file.file_size,
@@ -176,7 +163,7 @@ export function FilesPanel({ channelId, onClose }: FilesPanelProps) {
 			acc[type].push(file);
 			return acc;
 		},
-		{} as Record<string, FileType[]>,
+		{} as Record<string, FileWithMessage[]>,
 	);
 
 	return (

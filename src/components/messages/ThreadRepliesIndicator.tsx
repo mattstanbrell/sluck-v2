@@ -1,14 +1,8 @@
 import { ListEnd } from "lucide-react";
 import { UserAvatar } from "@/components/ui/UserAvatar";
+import type { ProfileWithId } from "@/types/profile";
 
-type Profile = {
-	id: string;
-	full_name: string | null;
-	display_name: string | null;
-	avatar_url: string | null;
-	avatar_color: string | null;
-	avatar_cache: string | null;
-};
+type Profile = ProfileWithId;
 
 interface ThreadRepliesIndicatorProps {
 	messageId: string;

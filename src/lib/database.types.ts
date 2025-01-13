@@ -1,3 +1,5 @@
+import type { Profile } from "@/types/profile";
+
 export type Json =
 	| string
 	| number
@@ -38,34 +40,137 @@ export interface Database {
 					created_at?: string;
 				};
 			};
-			profiles: {
+			channels: {
 				Row: {
 					id: string;
+					workspace_id: string;
+					name: string;
+					slug: string;
+					description: string | null;
+					created_by: string | null;
 					created_at: string;
-					email: string;
-					full_name: string;
-					display_name: string | null;
-					avatar_url: string | null;
-					last_seen: string | null;
 				};
 				Insert: {
-					id: string;
+					id?: string;
+					workspace_id: string;
+					name: string;
+					slug?: string;
+					description?: string | null;
+					created_by?: string | null;
 					created_at?: string;
-					email: string;
-					full_name: string;
-					display_name?: string | null;
-					avatar_url?: string | null;
-					last_seen?: string | null;
 				};
 				Update: {
 					id?: string;
+					workspace_id?: string;
+					name?: string;
+					slug?: string;
+					description?: string | null;
+					created_by?: string | null;
 					created_at?: string;
-					email?: string;
-					full_name?: string;
-					display_name?: string | null;
-					avatar_url?: string | null;
-					last_seen?: string | null;
 				};
+			};
+			channel_members: {
+				Row: {
+					channel_id: string;
+					user_id: string;
+					role: "admin" | "member";
+					joined_at: string;
+					last_read_at: string | null;
+				};
+				Insert: {
+					channel_id: string;
+					user_id: string;
+					role?: "admin" | "member";
+					joined_at?: string;
+					last_read_at?: string | null;
+				};
+				Update: {
+					channel_id?: string;
+					user_id?: string;
+					role?: "admin" | "member";
+					joined_at?: string;
+					last_read_at?: string | null;
+				};
+			};
+			conversations: {
+				Row: {
+					id: string;
+					workspace_id: string;
+					type: "direct" | "group";
+					created_at: string;
+				};
+				Insert: {
+					id?: string;
+					workspace_id: string;
+					type?: "direct" | "group";
+					created_at?: string;
+				};
+				Update: {
+					id?: string;
+					workspace_id?: string;
+					type?: "direct" | "group";
+					created_at?: string;
+				};
+			};
+			workspaces: {
+				Row: {
+					id: string;
+					name: string;
+					slug: string;
+					description: string | null;
+					created_by: string | null;
+					created_at: string;
+					invite_code: string | null;
+					invite_expires_at: string | null;
+					invite_is_revoked: boolean;
+				};
+				Insert: {
+					id?: string;
+					name: string;
+					slug?: string;
+					description?: string | null;
+					created_by?: string | null;
+					created_at?: string;
+					invite_code?: string | null;
+					invite_expires_at?: string | null;
+					invite_is_revoked?: boolean;
+				};
+				Update: {
+					id?: string;
+					name?: string;
+					slug?: string;
+					description?: string | null;
+					created_by?: string | null;
+					created_at?: string;
+					invite_code?: string | null;
+					invite_expires_at?: string | null;
+					invite_is_revoked?: boolean;
+				};
+			};
+			workspace_members: {
+				Row: {
+					workspace_id: string;
+					user_id: string;
+					role: "owner" | "admin" | "member";
+					joined_at: string;
+				};
+				Insert: {
+					workspace_id: string;
+					user_id: string;
+					role?: "owner" | "admin" | "member";
+					joined_at?: string;
+				};
+				Update: {
+					workspace_id?: string;
+					user_id?: string;
+					role?: "owner" | "admin" | "member";
+					joined_at?: string;
+				};
+			};
+			profiles: {
+				Row: Profile;
+				Insert: Omit<Profile, "created_at"> & { created_at?: string };
+				Update: Partial<Profile>;
 			};
 			messages: {
 				Row: {
@@ -76,7 +181,6 @@ export interface Database {
 					content: string;
 					created_at: string;
 					parent_id: string | null;
-					thread_participant: boolean | null;
 					profiles?: {
 						id: string;
 						full_name: string;
@@ -93,7 +197,6 @@ export interface Database {
 					content: string;
 					created_at?: string;
 					parent_id?: string | null;
-					thread_participant?: boolean | null;
 				};
 				Update: {
 					id?: string;
@@ -103,7 +206,6 @@ export interface Database {
 					content?: string;
 					created_at?: string;
 					parent_id?: string | null;
-					thread_participant?: boolean | null;
 				};
 			};
 		};

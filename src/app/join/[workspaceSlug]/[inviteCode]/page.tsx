@@ -6,11 +6,7 @@ import { useRouter, useParams } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { joinWorkspaceWithCode } from "@/app/actions/workspace";
-
-interface WorkspaceData {
-	id: string;
-	name: string;
-}
+import type { WorkspaceBasic } from "@/types/workspace";
 
 export default function JoinWorkspacePage() {
 	const params = useParams();
@@ -18,9 +14,7 @@ export default function JoinWorkspacePage() {
 	const inviteCode = params.inviteCode as string;
 	const [isLoading, setIsLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
-	const [workspaceData, setWorkspaceData] = useState<WorkspaceData | null>(
-		null,
-	);
+	const [workspace, setWorkspace] = useState<WorkspaceBasic | null>(null);
 	const supabase = createClient();
 	const router = useRouter();
 	const { toast } = useToast();
@@ -42,7 +36,7 @@ export default function JoinWorkspacePage() {
 				// Just get the workspace name - the function will handle validation
 				const { data: workspace, error: workspaceError } = await supabase
 					.from("workspaces")
-					.select("id, name")
+					.select("id, name, slug, description")
 					.eq("slug", workspaceSlug)
 					.single();
 
@@ -65,7 +59,7 @@ export default function JoinWorkspacePage() {
 					return;
 				}
 
-				setWorkspaceData(workspace);
+				setWorkspace(workspace);
 				setIsLoading(false);
 			} catch {
 				setError("An unexpected error occurred");
@@ -126,7 +120,7 @@ export default function JoinWorkspacePage() {
 		<div className="flex min-h-screen items-center justify-center bg-custom-background">
 			<div className="text-center space-y-4">
 				<h1 className="text-2xl font-semibold text-custom-text">
-					Join {workspaceData?.name}
+					Join {workspace?.name}
 				</h1>
 				<p className="text-custom-text-secondary">
 					You&apos;ve been invited to join this workspace

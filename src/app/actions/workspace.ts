@@ -66,7 +66,9 @@ export async function generateWorkspaceInvite(workspaceId: string) {
 			invite_is_revoked: false,
 		})
 		.eq("id", workspaceId)
-		.select("invite_code, invite_expires_at, invite_is_revoked")
+		.select(
+			"id, name, slug, description, invite_code, invite_expires_at, invite_is_revoked",
+		)
 		.single();
 
 	if (error) {
