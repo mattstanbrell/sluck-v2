@@ -1,6 +1,6 @@
 import { createClient } from "@/utils/supabase/server";
 import { notFound } from "next/navigation";
-import { MessageContainer } from "@/components/messages/MessageContainer";
+import { ChannelContent } from "@/components/channel/ChannelContent";
 
 export default async function ChannelPage({
 	params,
@@ -33,20 +33,5 @@ export default async function ChannelPage({
 		notFound();
 	}
 
-	return (
-		<div className="flex flex-col h-full">
-			{/* Channel Header */}
-			<div className="shrink-0">
-				<div className="px-4 py-[18px] flex items-center">
-					<h1 className="font-semibold">{channel.name}</h1>
-				</div>
-				<div className="border-t border-custom-ui-medium" />
-			</div>
-
-			{/* Messages */}
-			<div className="flex-1 min-h-0">
-				<MessageContainer channelId={channel.id} />
-			</div>
-		</div>
-	);
+	return <ChannelContent channel={channel} />;
 }

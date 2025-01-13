@@ -3,6 +3,7 @@ import {
 	useRef,
 	useState,
 	useCallback,
+	useMemo,
 	type CSSProperties,
 } from "react";
 import { createClient } from "@/utils/supabase/client";
@@ -10,8 +11,9 @@ import { MessageContent } from "./MessageContent";
 import { MessageTimestamp } from "./MessageTimestamp";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { Button } from "@/components/ui/button";
-import { MessageCircle, ListEnd } from "lucide-react";
+import { ListEnd } from "lucide-react";
 import type { Database } from "@/lib/database.types";
+import { ThreadRepliesIndicator } from "./ThreadRepliesIndicator";
 
 /* ------------------ Types & Helpers ------------------ */
 
@@ -24,11 +26,38 @@ type Message = Database["public"]["Tables"]["messages"]["Row"] & {
 		avatar_color: string | null;
 		avatar_cache: string | null;
 	};
+	reply_count: number;
+	reply_user_ids: string[];
+	files: {
+		id: string;
+		file_type: string | null;
+		file_name: string | null;
+		file_size: number | null;
+		file_url: string;
+	}[];
 };
 
 type MessageGroup = {
 	userId: string;
 	messages: Message[];
+};
+
+type MessagePayload = {
+	new: {
+		id: string;
+		reply_count: number;
+	};
+};
+
+type MessageInsertPayload = {
+	new: {
+		id: string;
+		channel_id: string | null;
+		conversation_id: string | null;
+		parent_id: string | null;
+		user_id: string;
+		content: string;
+	};
 };
 
 /**
@@ -76,21 +105,25 @@ function groupConsecutiveMessages(messages: Message[]): MessageGroup[] {
 	return groups;
 }
 
+const supabase = createClient();
+
 export function MessageList({
 	channelId,
 	conversationId,
 	parentId,
 	onThreadClick,
 	isMainView,
+	highlightedMessageId,
 }: {
 	channelId?: string;
 	conversationId?: string;
 	parentId?: string;
 	onThreadClick?: (messageId: string) => void;
 	isMainView?: boolean;
+	highlightedMessageId?: string;
 }) {
 	const [messages, setMessages] = useState<Message[]>([]);
-	const supabase = createClient();
+	const [isInitialLoad, setIsInitialLoad] = useState(true);
 	const messagesEndRef = useRef<HTMLDivElement>(null);
 
 	// Debug effect to track message state changes
@@ -98,42 +131,172 @@ export function MessageList({
 		console.log("[MessageList] Messages state updated:", messages.length);
 	}, [messages]);
 
-	// Ensure we scroll to bottom on new messages
+	// Ensure we scroll to bottom only on new messages or initial load
 	const scrollToBottom = useCallback(() => {
 		messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
 	}, []);
 
+	// Initial load scroll
 	useEffect(() => {
-		scrollToBottom();
-	}, [scrollToBottom]);
+		if (isInitialLoad && messages.length > 0) {
+			scrollToBottom();
+			setIsInitialLoad(false);
+		}
+	}, [isInitialLoad, messages.length, scrollToBottom]);
+
+	// Create a stable message update handler
+	const handleMessageUpdate = useCallback(
+		async (payload: MessagePayload) => {
+			const { data, error } = await supabase
+				.from("messages")
+				.select(
+					`*,
+					profile:profiles (
+						id,
+						full_name,
+						display_name,
+						avatar_url,
+						avatar_color,
+						avatar_cache
+					),
+					files (
+						id,
+						file_type,
+						file_name,
+						file_size,
+						file_url
+					)`,
+				)
+				.eq("id", payload.new.id)
+				.single();
+
+			if (error) {
+				console.error(
+					"[MessageList] Error fetching updated message details:",
+					error,
+				);
+				return;
+			}
+
+			if (data) {
+				setMessages((prev) =>
+					prev.map((m) =>
+						m.id === data.id
+							? ({ ...data, files: data.files || [] } as Message)
+							: m,
+					),
+				);
+			}
+		},
+		[], // No dependencies needed as supabase client is stable
+	);
+
+	// Create a stable message insert handler
+	const handleMessageInsert = useCallback(
+		async (payload: MessageInsertPayload) => {
+			// Only process messages that match our view
+			if (parentId) {
+				if (payload.new.parent_id !== parentId) return;
+			} else if (isMainView) {
+				if (channelId && payload.new.channel_id !== channelId) return;
+				if (conversationId && payload.new.conversation_id !== conversationId)
+					return;
+				if (payload.new.parent_id !== null) return;
+			}
+
+			// Add a small delay to ensure file insert has completed
+			await new Promise((resolve) => setTimeout(resolve, 500));
+
+			const { data, error } = await supabase
+				.from("messages")
+				.select(
+					`*,
+					profile:profiles (
+						id,
+						full_name,
+						display_name,
+						avatar_url,
+						avatar_color,
+						avatar_cache
+					),
+					files (
+						id,
+						file_type,
+						file_name,
+						file_size,
+						file_url
+					)`,
+				)
+				.eq("id", payload.new.id)
+				.single();
+
+			if (error) {
+				console.error(
+					"[MessageList] Error fetching new message details:",
+					error,
+				);
+				return;
+			}
+
+			if (data) {
+				setMessages((prev) => {
+					const newMessages = [
+						...prev,
+						{ ...data, files: data.files || [] } as Message,
+					];
+					const isAtBottom =
+						messagesEndRef.current &&
+						window.innerHeight + window.scrollY >=
+							document.documentElement.scrollHeight - 100;
+
+					if (isAtBottom) {
+						setTimeout(scrollToBottom, 100);
+					} else {
+						// Check if it's the current user's message
+						supabase.auth.getSession().then(({ data: { session } }) => {
+							if (data.user_id === session?.user?.id) {
+								setTimeout(scrollToBottom, 100);
+							}
+						});
+					}
+
+					return newMessages;
+				});
+			}
+		},
+		[parentId, channelId, conversationId, isMainView, scrollToBottom],
+	);
 
 	// Fetch & subscribe to messages
 	useEffect(() => {
 		if (!channelId && !conversationId) return;
 
-		console.log("[MessageList] Setting up subscription", {
-			channelId,
-			conversationId,
-			parentId,
-			isMainView,
-		});
+		const channelName = `messages-${isMainView ? "main" : "thread"}-${
+			channelId || conversationId
+		}`;
+
+		setIsInitialLoad(true);
 
 		async function fetchMessages() {
-			console.log("[MessageList] Fetching initial messages");
 			const query = supabase
 				.from("messages")
 				.select(
-					`
-            *,
-            profile:profiles (
-              id,
-              full_name,
-              display_name,
-              avatar_url,
-              avatar_color,
-              avatar_cache
-            )
-          `,
+					`*,
+					profile:profiles (
+						id,
+						full_name,
+						display_name,
+						avatar_url,
+						avatar_color,
+						avatar_cache
+					),
+					files (
+						id,
+						file_type,
+						file_name,
+						file_size,
+						file_url
+					)`,
 				)
 				.eq(
 					channelId ? "channel_id" : "conversation_id",
@@ -141,7 +304,6 @@ export function MessageList({
 				)
 				.order("created_at", { ascending: true });
 
-			// If parentId is provided, filter for thread messages
 			if (parentId) {
 				query.eq("parent_id", parentId);
 			} else if (isMainView) {
@@ -153,26 +315,14 @@ export function MessageList({
 			if (error) {
 				console.warn("[MessageList] Error fetching messages:", error);
 			} else if (data) {
-				console.log("[MessageList] Initial messages loaded:", data.length);
 				setMessages(data as Message[]);
-				scrollToBottom();
 			}
 		}
 
 		fetchMessages();
 
-		// Realtime subscription
-		console.log("[MessageList] Setting up subscription with NO filter", {
-			channelId,
-			conversationId,
-			parentId,
-			isMainView,
-		});
-
 		const channel = supabase
-			.channel(
-				`messages-${isMainView ? "main" : "thread"}-${channelId || conversationId}`,
-			)
+			.channel(channelName)
 			.on(
 				"postgres_changes",
 				{
@@ -180,115 +330,96 @@ export function MessageList({
 					schema: "public",
 					table: "messages",
 				},
+				handleMessageInsert,
+			)
+			.on(
+				"postgres_changes",
+				{
+					event: "UPDATE",
+					schema: "public",
+					table: "messages",
+				},
+				handleMessageUpdate,
+			)
+			.on(
+				"postgres_changes",
+				{
+					event: "INSERT",
+					schema: "public",
+					table: "files",
+				},
 				async (payload) => {
-					console.log("[MessageList] Received ANY message:", {
-						messageId: payload.new.id,
-						channelId: payload.new.channel_id,
-						conversationId: payload.new.conversation_id,
-						parentId: payload.new.parent_id,
-						content: `${payload.new.content.slice(0, 50)}...`,
-						isMainView,
-					});
-
-					// Only process messages that match our view
-					if (parentId) {
-						if (payload.new.parent_id !== parentId) {
-							console.log("[MessageList] Skipping - wrong parent_id");
-							return;
-						}
-					} else if (isMainView) {
-						if (channelId && payload.new.channel_id !== channelId) {
-							console.log("[MessageList] Skipping - wrong channel_id");
-							return;
-						}
-						if (
-							conversationId &&
-							payload.new.conversation_id !== conversationId
-						) {
-							console.log("[MessageList] Skipping - wrong conversation_id");
-							return;
-						}
-						if (payload.new.parent_id !== null) {
-							console.log("[MessageList] Skipping - is a thread message");
-							return;
-						}
-					}
-
-					// Fetch the newly inserted message with its profile
+					// When a file is inserted, fetch the updated message
 					const { data, error } = await supabase
 						.from("messages")
 						.select(
-							`
-                *,
-                profile:profiles (
-                  id,
-                  full_name,
-                  display_name,
-                  avatar_url,
-                  avatar_color,
-                  avatar_cache
-                )
-              `,
+							`*,
+							profile:profiles (
+								id,
+								full_name,
+								display_name,
+								avatar_url,
+								avatar_color,
+								avatar_cache
+							),
+							files (
+								id,
+								file_type,
+								file_name,
+								file_size,
+								file_url
+							)`,
 						)
-						.eq("id", payload.new.id)
+						.eq("id", payload.new.message_id)
 						.single();
 
 					if (error) {
 						console.error(
-							"[MessageList] Error fetching new message details:",
+							"[MessageList] Error fetching message after file insert:",
 							error,
 						);
 						return;
 					}
 
 					if (data) {
-						// Force a new array reference to ensure re-render
-						setMessages((prev) => {
-							console.log("[MessageList] Adding new message to state:", {
-								messageId: data.id,
-								content: `${data.content.slice(0, 50)}...`,
-								currentMessageCount: prev.length,
-								isMainView,
-							});
-
-							const newMessages = [...prev, data as Message];
-							console.log(
-								"[MessageList] New message count:",
-								newMessages.length,
-							);
-							return newMessages;
-						});
+						setMessages((prev) =>
+							prev.map((m) =>
+								m.id === data.id
+									? ({ ...data, files: data.files || [] } as Message)
+									: m,
+							),
+						);
 					}
 				},
 			)
-			.subscribe((status) => {
-				console.log("[MessageList] Subscription status:", status);
-			});
+			.subscribe();
 
 		return () => {
-			console.log("[MessageList] Cleaning up subscription");
 			channel.unsubscribe();
 		};
 	}, [
 		channelId,
 		conversationId,
 		parentId,
-		supabase,
-		scrollToBottom,
 		isMainView,
+		handleMessageInsert,
+		handleMessageUpdate,
 	]);
 
 	// Group messages into chains
 	const messageGroups = groupConsecutiveMessages(messages);
 
 	return (
-		<div className="flex flex-col gap-4 p-4">
+		<div
+			className={`flex flex-col gap-4 overflow-x-hidden ${isMainView ? "px-8 pt-7 pb-10" : "px-4 pt-3 pb-10"}`}
+		>
 			{messageGroups.map((chain, i) => (
 				<ChainGroup
 					key={`chain-${chain.userId}-${i}`}
 					chain={chain}
 					onThreadClick={onThreadClick}
 					showThreadButton={isMainView}
+					highlightedMessageId={highlightedMessageId}
 				/>
 			))}
 			<div ref={messagesEndRef} />
@@ -301,10 +432,12 @@ function ChainGroup({
 	chain,
 	onThreadClick,
 	showThreadButton,
+	highlightedMessageId,
 }: {
 	chain: { userId: string; messages: Message[] };
 	onThreadClick?: (messageId: string) => void;
 	showThreadButton?: boolean;
+	highlightedMessageId?: string;
 }) {
 	const { messages } = chain;
 	const firstMsg = messages[0];
@@ -366,11 +499,29 @@ function ChainGroup({
 		};
 	}, [showChainLine, userProfile.avatar_color, isMounted]);
 
+	// Build a map of profiles for the thread replies indicator
+	const profilesMap = useMemo(() => {
+		const map: Record<string, Message["profile"]> = {};
+		for (const m of messages) {
+			if (m.profile?.id) {
+				map[m.profile.id] = {
+					id: m.profile.id,
+					full_name: m.profile.full_name,
+					display_name: m.profile.display_name,
+					avatar_url: m.profile.avatar_url,
+					avatar_color: m.profile.avatar_color,
+					avatar_cache: m.profile.avatar_cache,
+				};
+			}
+		}
+		return map;
+	}, [messages]);
+
 	return (
-		<div ref={chainRef} className="mt-6 space-y-0.5">
+		<div ref={chainRef} className="space-y-0.5 relative">
 			{/* 1) FIRST MESSAGE ROW (with avatar) */}
 			<div
-				className="-mx-8 px-8 group relative flex items-start gap-4 py-2 transition-colors"
+				className="group relative flex items-start gap-4 py-0.5 px-8 -mx-8 transition-colors"
 				onMouseEnter={() => setHoveredMessageId(firstMsg.id)}
 				onMouseLeave={() => setHoveredMessageId(null)}
 				style={
@@ -381,7 +532,7 @@ function ChainGroup({
 				}
 			>
 				<div
-					className="absolute inset-0 opacity-0 group-hover:opacity-5 transition-opacity pointer-events-none"
+					className={`absolute inset-0 ${highlightedMessageId === firstMsg.id ? "opacity-5" : "opacity-0 group-hover:opacity-5"} transition-opacity pointer-events-none`}
 					style={{ backgroundColor: "var(--hover-bg)" }}
 				/>
 				{/* Avatar */}
@@ -416,25 +567,37 @@ function ChainGroup({
 						/>
 					</div>
 					<div className="relative">
-						<MessageContent content={firstMsg.content} />
+						<MessageContent content={firstMsg.content} files={firstMsg.files} />
 						{showThreadButton &&
 							onThreadClick &&
-							hoveredMessageId === firstMsg.id && (
+							!firstMsg.reply_count &&
+							hoveredMessageId === firstMsg.id &&
+							highlightedMessageId !== firstMsg.id && (
 								<div
-									className="absolute -bottom-7 left-0 h-7 z-20 w-fit"
+									className="absolute left-0 h-6 z-20 w-fit"
+									style={{ bottom: "-22px" }}
 									onMouseEnter={() => setHoveredMessageId(firstMsg.id)}
 								>
 									<Button
 										variant="ghost"
 										size="sm"
 										onClick={() => onThreadClick(firstMsg.id)}
-										className="text-custom-text-secondary hover:text-custom-text border border-custom-ui-medium backdrop-blur-sm bg-custom-background/80"
+										className="text-custom-text-secondary hover:text-custom-text border border-custom-ui-medium bg-custom-background-secondary hover:bg-custom-ui-faint transition-colors"
 									>
 										<ListEnd className="h-4 w-4 mr-1 -scale-x-100" />
 										Reply in thread
 									</Button>
 								</div>
 							)}
+						{showThreadButton && onThreadClick && firstMsg.reply_count > 0 && (
+							<ThreadRepliesIndicator
+								messageId={firstMsg.id}
+								replyUserIds={firstMsg.reply_user_ids}
+								profiles={profilesMap}
+								onClick={() => onThreadClick(firstMsg.id)}
+								highlightedMessageId={highlightedMessageId}
+							/>
+						)}
 					</div>
 				</div>
 			</div>
@@ -447,7 +610,7 @@ function ChainGroup({
 						<div
 							key={m.id}
 							data-last-message={isLast ? true : undefined}
-							className="-mx-8 px-8 group relative py-1 transition-colors"
+							className="-mx-8 px-8 group relative py-0.5 transition-colors"
 							onMouseEnter={() => setHoveredMessageId(m.id)}
 							onMouseLeave={() => setHoveredMessageId(null)}
 							style={
@@ -458,7 +621,7 @@ function ChainGroup({
 							}
 						>
 							<div
-								className="absolute inset-0 opacity-0 group-hover:opacity-5 transition-opacity pointer-events-none"
+								className={`absolute inset-0 ${highlightedMessageId === m.id ? "opacity-5" : "opacity-0 group-hover:opacity-5"} transition-opacity pointer-events-none`}
 								style={{ backgroundColor: "var(--hover-bg)" }}
 							/>
 							<div className="ml-[3.5rem]">
@@ -466,25 +629,37 @@ function ChainGroup({
 									<MessageTimestamp timestamp={m.created_at} hideColon />
 								</div>
 								<div className="relative">
-									<MessageContent content={m.content} />
+									<MessageContent content={m.content} files={m.files} />
 									{showThreadButton &&
 										onThreadClick &&
-										hoveredMessageId === m.id && (
+										!m.reply_count &&
+										hoveredMessageId === m.id &&
+										highlightedMessageId !== m.id && (
 											<div
-												className="absolute -bottom-7 left-0 h-7 z-20 w-fit"
+												className="absolute left-0 h-6 z-20 w-fit"
+												style={{ bottom: "-22px" }}
 												onMouseEnter={() => setHoveredMessageId(m.id)}
 											>
 												<Button
 													variant="ghost"
 													size="sm"
 													onClick={() => onThreadClick(m.id)}
-													className="text-custom-text-secondary hover:text-custom-text border border-custom-ui-medium backdrop-blur-sm bg-custom-background/80"
+													className="text-custom-text-secondary hover:text-custom-text border border-custom-ui-medium bg-custom-background-secondary hover:bg-custom-ui-faint transition-colors"
 												>
 													<ListEnd className="h-4 w-4 mr-1 -scale-x-100" />
 													Reply in thread
 												</Button>
 											</div>
 										)}
+									{showThreadButton && onThreadClick && m.reply_count > 0 && (
+										<ThreadRepliesIndicator
+											messageId={m.id}
+											replyUserIds={m.reply_user_ids}
+											profiles={profilesMap}
+											onClick={() => onThreadClick(m.id)}
+											highlightedMessageId={highlightedMessageId}
+										/>
+									)}
 								</div>
 							</div>
 						</div>

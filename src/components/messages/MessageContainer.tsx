@@ -4,13 +4,18 @@ import { useState } from "react";
 import { MessageList } from "@/components/messages/MessageList";
 import { MessageInput } from "@/components/messages/MessageInput";
 import { ThreadPanel } from "@/components/messages/ThreadPanel";
+import { FilesPanel } from "@/components/messages/FilesPanel";
 
 export function MessageContainer({
 	channelId,
 	conversationId,
+	showFiles,
+	onCloseFiles,
 }: {
 	channelId?: string;
 	conversationId?: string;
+	showFiles?: boolean;
+	onCloseFiles?: () => void;
 }) {
 	const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
 
@@ -24,6 +29,7 @@ export function MessageContainer({
 						conversationId={conversationId}
 						onThreadClick={setSelectedThreadId}
 						isMainView={true}
+						highlightedMessageId={selectedThreadId || undefined}
 					/>
 				</div>
 				<div className="shrink-0">
@@ -39,6 +45,11 @@ export function MessageContainer({
 					conversationId={conversationId}
 					onClose={() => setSelectedThreadId(null)}
 				/>
+			)}
+
+			{/* Files panel */}
+			{showFiles && channelId && onCloseFiles && (
+				<FilesPanel channelId={channelId} onClose={onCloseFiles} />
 			)}
 		</div>
 	);

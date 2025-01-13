@@ -1,13 +1,36 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { createClient } from "@/utils/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Bold, Italic, List, Code, Link2, Terminal } from "lucide-react";
+import {
+	Bold,
+	Italic,
+	List,
+	Code,
+	Link2,
+	Terminal,
+	Upload,
+	X,
+	MoreHorizontal,
+} from "lucide-react";
 import type { Database } from "@/lib/database.types";
+import { useFileUpload } from "@/hooks/useFileUpload";
+import { useDropzone } from "react-dropzone";
+import { Alert } from "@/components/ui/Alert";
+import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui/popover";
 
 type MessageInsert = Database["public"]["Tables"]["messages"]["Insert"];
+
+// Add a helper function to generate a unique key for files
+const generateFileKey = (file: File, index: number) => {
+	return `${file.name}-${file.size}-${index}`;
+};
 
 export function MessageInput({
 	channelId,
@@ -21,12 +44,33 @@ export function MessageInput({
 	const [content, setContent] = useState("");
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [isResizing, setIsResizing] = useState(false);
+	const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+	const [error, setError] = useState<string | null>(null);
 	const supabase = createClient();
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
 	const isResizingRef = useRef(false);
 	const startHeightRef = useRef(0);
 	const startYRef = useRef(0);
+	const fileInputRef = useRef<HTMLInputElement>(null);
+
+	const { uploadFile } = useFileUpload({
+		maxSizeMB: 50,
+		allowedTypes: ["image/*", "video/*", "audio/*", "application/pdf"],
+	});
+
+	const onDrop = useCallback((acceptedFiles: File[]) => {
+		setPendingFiles((prev) => [...prev, ...acceptedFiles]);
+	}, []);
+
+	const { getRootProps, isDragActive } = useDropzone({
+		onDrop,
+		noClick: true,
+	});
+
+	const removePendingFile = (file: File) => {
+		setPendingFiles((prev) => prev.filter((f) => f !== file));
+	};
 
 	useEffect(() => {
 		textareaRef.current?.focus();
@@ -123,17 +167,13 @@ export function MessageInput({
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
-		if (!content.trim() || isSubmitting) return;
+		if ((!content.trim() && pendingFiles.length === 0) || isSubmitting) return;
 
 		setIsSubmitting(true);
-		try {
-			console.log("[MessageInput] Submitting message:", {
-				channelId,
-				conversationId,
-				parentId,
-				content: `${content.slice(0, 50)}...`,
-			});
+		setError(null);
+		let messageId: string | null = null;
 
+		try {
 			// Get the current user
 			const {
 				data: { user },
@@ -150,23 +190,30 @@ export function MessageInput({
 				user_id: user.id,
 			};
 
-			console.log("[MessageInput] Inserting message:", messageData);
-
-			const { data, error } = await supabase
+			// Insert the message first
+			const { data: message, error: messageError } = await supabase
 				.from("messages")
 				.insert(messageData)
 				.select()
 				.single();
 
-			if (error) {
-				console.error("[MessageInput] Error inserting message:", error);
-				throw error;
-			}
+			if (messageError) throw messageError;
+			messageId = message.id;
 
-			console.log("[MessageInput] Message sent successfully:", {
-				messageId: data.id,
-				content: `${data.content.slice(0, 50)}...`,
-			});
+			// Upload any pending files
+			if (pendingFiles.length > 0) {
+				try {
+					await Promise.all(
+						pendingFiles.map((file) => uploadFile(file, message.id)),
+					);
+				} catch (uploadError) {
+					// If any file upload fails, delete the message and throw the error
+					if (messageId) {
+						await supabase.from("messages").delete().eq("id", messageId);
+					}
+					throw uploadError;
+				}
+			}
 
 			// Update conversation's last_message_at if it's a DM
 			if (conversationId) {
@@ -179,8 +226,16 @@ export function MessageInput({
 			}
 
 			setContent("");
+			setPendingFiles([]);
 		} catch (error) {
 			console.error("[MessageInput] Error sending message:", error);
+			// If we created a message but something failed after, clean it up
+			if (messageId) {
+				await supabase.from("messages").delete().eq("id", messageId);
+			}
+			setError(
+				error instanceof Error ? error.message : "Failed to send message",
+			);
 		} finally {
 			setIsSubmitting(false);
 			textareaRef.current?.focus();
@@ -194,90 +249,165 @@ export function MessageInput({
 		}
 	};
 
+	const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+		if (e.target.files) {
+			setPendingFiles((prev) => [...prev, ...Array.from(e.target.files || [])]);
+		}
+	};
+
 	return (
-		<form onSubmit={handleSubmit} className="relative">
-			<div
-				ref={containerRef}
-				className={`min-h-[144px] max-h-[50vh] border-t border-custom-ui-medium relative bg-custom-background-secondary ${isResizing ? "select-none" : ""}`}
-				style={{ height: "144px" }}
-			>
+		<>
+			{error && <Alert message={error} onDismiss={() => setError(null)} />}
+			<form onSubmit={handleSubmit} className="relative" {...getRootProps()}>
 				<div
-					className="absolute -top-1 left-0 right-0 h-2 cursor-row-resize hover:bg-custom-ui-medium"
-					onMouseDown={handleResizeStart}
-				/>
-				<div className="p-4 space-y-2 h-full flex flex-col">
-					<div className="flex gap-1">
-						<Button
-							type="button"
-							variant="ghost"
-							size="sm"
-							onClick={() => insertMarkdown("**")}
-							title="Bold"
-							className="text-custom-text hover:bg-custom-ui-medium hover:text-custom-text"
-						>
-							<Bold className="h-4 w-4" />
-						</Button>
-						<Button
-							type="button"
-							variant="ghost"
-							size="sm"
-							onClick={() => insertMarkdown("*")}
-							title="Italic"
-							className="text-custom-text hover:bg-custom-ui-medium hover:text-custom-text"
-						>
-							<Italic className="h-4 w-4" />
-						</Button>
-						<Button
-							type="button"
-							variant="ghost"
-							size="sm"
-							onClick={() => insertMarkdown("\n- ")}
-							title="List"
-							className="text-custom-text hover:bg-custom-ui-medium hover:text-custom-text"
-						>
-							<List className="h-4 w-4" />
-						</Button>
-						<Button
-							type="button"
-							variant="ghost"
-							size="sm"
-							onClick={() => insertMarkdown("`")}
-							title="Inline Code"
-							className="text-custom-text hover:bg-custom-ui-medium hover:text-custom-text"
-						>
-							<Code className="h-4 w-4" />
-						</Button>
-						<Button
-							type="button"
-							variant="ghost"
-							size="sm"
-							onClick={insertCodeBlock}
-							title="Code Block"
-							className="text-custom-text hover:bg-custom-ui-medium hover:text-custom-text"
-						>
-							<Terminal className="h-4 w-4" />
-						</Button>
-						<Button
-							type="button"
-							variant="ghost"
-							size="sm"
-							onClick={() => insertMarkdown("[", "](url)")}
-							title="Link"
-							className="text-custom-text hover:bg-custom-ui-medium hover:text-custom-text"
-						>
-							<Link2 className="h-4 w-4" />
-						</Button>
-					</div>
-					<Textarea
-						ref={textareaRef}
-						value={content}
-						onChange={(e) => setContent(e.target.value)}
-						onKeyDown={handleKeyDown}
-						placeholder="Type a message... (Markdown supported)"
-						className="flex-1 resize-none focus-visible:ring-0 focus-visible:ring-offset-0 border-0 bg-custom-background text-custom-text placeholder:text-custom-text-secondary"
+					ref={containerRef}
+					className={`min-h-[144px] max-h-[50vh] border-t border-custom-ui-medium relative bg-custom-background-secondary ${
+						isResizing ? "select-none" : ""
+					} ${isDragActive ? "border-2 border-dashed border-blue-500" : ""}`}
+					style={{ height: "144px" }}
+				>
+					<div
+						className="absolute -top-1 left-0 right-0 h-2 cursor-row-resize hover:bg-custom-ui-medium"
+						onMouseDown={handleResizeStart}
 					/>
+					<div className="p-4 space-y-2 h-full flex flex-col">
+						<div className="flex flex-wrap gap-2 items-center">
+							<div className="flex gap-1">
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									onClick={() => insertMarkdown("**")}
+									title="Bold"
+									className="text-custom-text hover:bg-custom-ui-medium hover:text-custom-text"
+								>
+									<Bold className="h-4 w-4" />
+								</Button>
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									onClick={() => insertMarkdown("*")}
+									title="Italic"
+									className="text-custom-text hover:bg-custom-ui-medium hover:text-custom-text"
+								>
+									<Italic className="h-4 w-4" />
+								</Button>
+
+								<Popover>
+									<PopoverTrigger asChild>
+										<Button
+											type="button"
+											variant="ghost"
+											size="sm"
+											className="text-custom-text hover:bg-custom-ui-medium hover:text-custom-text"
+											title="More formatting options"
+										>
+											<MoreHorizontal className="h-4 w-4" />
+										</Button>
+									</PopoverTrigger>
+									<PopoverContent
+										className="w-auto p-2 flex gap-1 bg-custom-background border border-custom-ui-medium rounded-md shadow-sm"
+										align="start"
+										side="top"
+										sideOffset={4}
+									>
+										<Button
+											type="button"
+											variant="ghost"
+											size="sm"
+											onClick={() => insertMarkdown("\n- ")}
+											title="List"
+											className="text-custom-text hover:bg-custom-ui-medium hover:text-custom-text"
+										>
+											<List className="h-4 w-4" />
+										</Button>
+										<Button
+											type="button"
+											variant="ghost"
+											size="sm"
+											onClick={() => insertMarkdown("`")}
+											title="Inline Code"
+											className="text-custom-text hover:bg-custom-ui-medium hover:text-custom-text"
+										>
+											<Code className="h-4 w-4" />
+										</Button>
+										<Button
+											type="button"
+											variant="ghost"
+											size="sm"
+											onClick={insertCodeBlock}
+											title="Code Block"
+											className="text-custom-text hover:bg-custom-ui-medium hover:text-custom-text"
+										>
+											<Terminal className="h-4 w-4" />
+										</Button>
+										<Button
+											type="button"
+											variant="ghost"
+											size="sm"
+											onClick={() => insertMarkdown("[", "](url)")}
+											title="Link"
+											className="text-custom-text hover:bg-custom-ui-medium hover:text-custom-text"
+										>
+											<Link2 className="h-4 w-4" />
+										</Button>
+									</PopoverContent>
+								</Popover>
+
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									onClick={() => fileInputRef.current?.click()}
+									title="Upload File"
+									className="text-custom-text hover:bg-custom-ui-medium hover:text-custom-text"
+								>
+									<Upload className="h-4 w-4" />
+								</Button>
+								<input
+									ref={fileInputRef}
+									type="file"
+									className="hidden"
+									multiple
+									onChange={handleFileSelect}
+								/>
+							</div>
+
+							{pendingFiles.length > 0 && (
+								<div className="flex flex-wrap gap-2">
+									{pendingFiles.map((file, i) => (
+										<div
+											key={generateFileKey(file, i)}
+											className="flex items-center gap-2 px-2 py-1 bg-custom-ui-medium rounded"
+										>
+											<span className="text-sm truncate max-w-[200px]">
+												{file.name}
+											</span>
+											<button
+												type="button"
+												onClick={() => removePendingFile(file)}
+												className="text-custom-text hover:text-red-500"
+											>
+												<X className="h-4 w-4" />
+											</button>
+										</div>
+									))}
+								</div>
+							)}
+						</div>
+
+						<Textarea
+							ref={textareaRef}
+							value={content}
+							onChange={(e) => setContent(e.target.value)}
+							onKeyDown={handleKeyDown}
+							placeholder={`Message ${channelId ? "#general" : "User"}`}
+							className="flex-1 resize-none bg-custom-background border border-custom-ui-faint p-2 focus:border-2 focus:border-custom-ui-strong outline-none ring-0 focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 text-custom-text placeholder:text-custom-text-muted rounded-md"
+						/>
+					</div>
 				</div>
-			</div>
-		</form>
+			</form>
+		</>
 	);
 }

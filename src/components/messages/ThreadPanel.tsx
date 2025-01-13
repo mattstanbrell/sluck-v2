@@ -20,6 +20,7 @@ type Message = Database["public"]["Tables"]["messages"]["Row"] & {
 		avatar_color: string | null;
 		avatar_cache: string | null;
 	};
+	files?: Database["public"]["Tables"]["files"]["Row"][];
 };
 
 interface ThreadPanelProps {
@@ -58,6 +59,13 @@ export function ThreadPanel({
               avatar_url,
               avatar_color,
               avatar_cache
+            ),
+            files (
+              id,
+              file_type,
+              file_name,
+              file_size,
+              file_url
             )
           `,
 				)
@@ -145,12 +153,15 @@ export function ThreadPanel({
 			>
 				{/* Thread Header - Fixed */}
 				<div className="shrink-0 flex items-center justify-between px-4 py-2 border-b border-custom-ui-medium">
-					<ListEnd className="h-4 w-4 text-custom-text-secondary -scale-x-100" />
+					<div className="flex items-center gap-2">
+						<ListEnd className="h-4 w-4 text-custom-text-secondary -scale-x-100" />
+						<span className="font-medium text-custom-text">Thread</span>
+					</div>
 					<Button
 						variant="ghost"
 						size="icon"
 						onClick={onClose}
-						className="text-custom-text-secondary hover:text-custom-text"
+						className="text-custom-text-secondary hover:text-custom-text hover:bg-custom-ui-faint"
 					>
 						<X className="h-4 w-4" />
 					</Button>
@@ -180,7 +191,10 @@ export function ThreadPanel({
 										</span>
 										<MessageTimestamp timestamp={parentMessage.created_at} />
 									</div>
-									<MessageContent content={parentMessage.content} />
+									<MessageContent
+										content={parentMessage.content}
+										files={parentMessage.files || []}
+									/>
 								</div>
 							</div>
 						</div>

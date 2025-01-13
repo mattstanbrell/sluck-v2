@@ -276,11 +276,45 @@ CREATE TABLE messages (
   content TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   parent_id UUID REFERENCES messages(id) ON DELETE CASCADE,
+  reply_count INTEGER NOT NULL DEFAULT 0,
+  reply_user_ids UUID[] NOT NULL DEFAULT '{}',
   CONSTRAINT message_container_check CHECK (
     (conversation_id IS NULL AND channel_id IS NOT NULL) OR
     (conversation_id IS NOT NULL AND channel_id IS NULL)
   )
 );
+
+-- Thread reply tracking trigger function
+CREATE OR REPLACE FUNCTION update_parent_thread_info()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- Only proceed if this is a reply (has a parent_id)
+  IF NEW.parent_id IS NOT NULL THEN
+    -- Update the parent message's reply count and maintain up to 3 unique replier IDs
+    UPDATE messages
+    SET 
+      reply_count = reply_count + 1,
+      reply_user_ids = (
+        SELECT DISTINCT ARRAY(
+          SELECT UNNEST(ARRAY[NEW.user_id] || reply_user_ids)
+          LIMIT 3
+        )
+      )
+    WHERE id = NEW.parent_id;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+-- Attach trigger to messages table
+CREATE TRIGGER update_thread_info_trigger
+AFTER INSERT ON messages
+FOR EACH ROW
+EXECUTE FUNCTION update_parent_thread_info();
 
 CREATE INDEX messages_conversation_id_idx ON messages(conversation_id);
 CREATE INDEX messages_channel_id_idx ON messages(channel_id);
@@ -354,6 +388,71 @@ ON messages FOR DELETE
 TO authenticated
 USING (auth.uid() = user_id);
 ```
+
+### Files
+
+```sql
+CREATE TABLE files (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  file_type TEXT,
+  file_name TEXT,
+  file_size BIGINT,
+  file_url TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Enable Row Level Security
+ALTER TABLE files ENABLE ROW LEVEL SECURITY;
+
+-- Grant select access if a user can view the parent message 
+CREATE POLICY "Users can read files if they can read the parent message"
+ON files FOR SELECT
+TO authenticated
+USING (
+  EXISTS (
+    SELECT 1
+    FROM messages
+    WHERE messages.id = files.message_id
+      AND (
+        (channel_id IN (
+          SELECT channel_id
+          FROM channel_members
+          WHERE user_id = auth.uid()
+        ))
+        OR
+        (conversation_id IN (
+          SELECT conversation_id
+          FROM conversation_participants
+          WHERE user_id = auth.uid()
+        ))
+      )
+  )
+);
+
+-- Insert policy: users can add a file only to messages they own
+CREATE POLICY "Users can insert files for their own messages"
+ON files FOR INSERT
+TO authenticated
+WITH CHECK (
+  EXISTS (
+    SELECT 1
+    FROM messages
+    WHERE messages.id = files.message_id
+      AND messages.user_id = auth.uid()
+  )
+);
+
+-- Add to realtime publication
+ALTER PUBLICATION supabase_realtime ADD TABLE files;
+```
+
+- Links each file to a message for context and permissions inheritance
+- Enforces RLS based on message visibility
+- Ensures users can only attach files to their own messages
+- Tracks file metadata (type, name, size) for UI display
+- Stores file URL for access (typically an S3 URL)
+- Enables real-time updates for file attachments
 
 ## Functions and Triggers
 
@@ -929,3 +1028,30 @@ ALTER PUBLICATION supabase_realtime ADD TABLE messages;
 ### Presence & Profiles
 - last_seen in profiles for presence
 - Row-level security ensures privacy
+
+### File Attachments
+- Files are linked to messages for context and permission inheritance
+- RLS policies mirror message visibility, ensuring files are only accessible to users who can see the parent message
+- File metadata stored in database while actual files live in S3
+- Real-time enabled for instant file attachment updates
+- No direct file deletion policy needed as files are automatically removed when parent message is deleted (ON DELETE CASCADE)
+
+## Thread Reply Indicators
+
+The messages table includes support for tracking and displaying thread replies efficiently:
+
+### New Columns
+- `reply_count`: Tracks the total number of replies to a message
+- `reply_user_ids`: Stores up to 3 most recent unique user IDs who replied
+
+### Automatic Updates
+A trigger function `update_parent_thread_info()` automatically maintains these fields:
+- Increments `reply_count` when a new reply is added
+- Updates `reply_user_ids` to include the new replier's ID (up to 3 unique IDs)
+- Runs after each INSERT on the messages table
+- Only updates these fields when the message is a reply (has a parent_id)
+
+This enables efficient display of thread indicators without additional queries:
+- Show reply count directly from the parent message
+- Display up to 3 replier avatars using the stored user IDs
+- Maintain consistency via trigger-based updates

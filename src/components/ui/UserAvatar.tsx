@@ -11,7 +11,7 @@ interface UserAvatarProps {
 	avatarCache?: string | null;
 	avatarColor?: string | null;
 	className?: string;
-	size?: "xs" | "sm" | "md" | "lg" | "xl";
+	size?: "2xs" | "xs" | "sm" | "md" | "lg" | "xl";
 }
 
 export function UserAvatar({
@@ -27,13 +27,14 @@ export function UserAvatar({
 	const fallbackName = displayName || fullName || "User";
 	const resolvedColor = avatarColor || "rgb(20, 148, 132)";
 
-	// Size mappings
+	// Size mappings (using 25% border radius for consistent rounding)
 	const sizeClasses = {
-		xs: "h-6 w-6 rounded-lg",
-		sm: "h-8 w-8 rounded-xl",
-		md: "h-10 w-10 rounded-xl",
-		lg: "h-12 w-12 rounded-xl",
-		xl: "h-14 w-14 rounded-xl",
+		"2xs": "h-5 w-5 rounded-[5px] text-xs", // 20px -> 5px radius
+		xs: "h-6 w-6 rounded-[6px]", // 24px -> 6px radius
+		sm: "h-8 w-8 rounded-[8px]", // 32px -> 8px radius
+		md: "h-10 w-10 rounded-[10px]", // 40px -> 10px radius
+		lg: "h-12 w-12 rounded-[12px]", // 48px -> 12px radius
+		xl: "h-14 w-14 rounded-[14px]", // 56px -> 14px radius
 	};
 
 	useEffect(() => {
@@ -76,8 +77,11 @@ export function UserAvatar({
 		>
 			<AvatarImage src={resolvedSrc} alt={fallbackName} />
 			<AvatarFallback
-				className="bg-custom-text-secondary text-white rounded-xl"
-				style={{ backgroundColor: resolvedColor }}
+				className="text-white"
+				style={{
+					backgroundColor: resolvedColor,
+					borderRadius: "inherit",
+				}}
 			>
 				{initials}
 			</AvatarFallback>
