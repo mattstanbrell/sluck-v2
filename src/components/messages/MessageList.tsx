@@ -74,12 +74,14 @@ const INITIAL_LOAD_DONE = { current: false };
 export function MessageList({
 	channelId,
 	parentId,
+	conversationId,
 	onThreadClick,
 	isMainView,
 	highlightedMessageId,
 }: {
 	channelId?: string;
 	parentId?: string;
+	conversationId?: string;
 	onThreadClick?: (messageId: string) => void;
 	isMainView?: boolean;
 	highlightedMessageId?: string;
@@ -212,8 +214,13 @@ export function MessageList({
 							file_url
 						)`,
 					)
-					.eq("channel_id", channelId)
 					.order("created_at", { ascending: true });
+
+				if (channelId) {
+					query.eq("channel_id", channelId);
+				} else if (conversationId) {
+					query.eq("conversation_id", conversationId);
+				}
 
 				if (parentId) {
 					query.eq("parent_id", parentId);
@@ -245,7 +252,14 @@ export function MessageList({
 		}
 
 		fetchMessages();
-	}, [channelId, hasMessages, parentId, isMainView, updateChannelMessages]);
+	}, [
+		channelId,
+		hasMessages,
+		parentId,
+		isMainView,
+		updateChannelMessages,
+		conversationId,
+	]);
 
 	if (isLoading && !hasMessages) {
 		return (
