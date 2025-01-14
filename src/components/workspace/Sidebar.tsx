@@ -9,6 +9,7 @@ import { CreateChannelDialog } from "./CreateChannelDialog";
 import { WorkspaceSettingsDialog } from "./WorkspaceSettingsDialog";
 import { CreateDirectMessageDialog } from "./CreateDirectMessageDialog";
 import { UserAvatar } from "@/components/ui/UserAvatar";
+import { ChannelPrefetcher } from "./ChannelPrefetcher";
 import type { ProfileDisplay } from "@/types/profile";
 import type {
 	ConversationWithParticipants,
@@ -31,7 +32,7 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 	const pathname = usePathname();
 
 	useEffect(() => {
-		async function loadData() {
+		async function loadInitialData() {
 			// Get current user
 			const {
 				data: { user },
@@ -44,22 +45,6 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 				.select("id, name, slug, description")
 				.eq("id", workspaceId)
 				.single();
-
-			// Load channels
-			const { data: channelsData, error: channelsError } = await supabase
-				.from("channels")
-				.select("id, name, slug, description")
-				.eq("workspace_id", workspaceId)
-				.order("name");
-
-			if (channelsError) {
-				console.error("[Sidebar] Error fetching channels:", channelsError);
-				return;
-			}
-
-			if (channelsData) {
-				setChannels(channelsData);
-			}
 
 			// Load conversations
 			const { data: conversations } = await supabase
@@ -104,29 +89,6 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 			setWorkspace(workspace);
 			setConversations(transformedConversations || []);
 			setProfile(profile);
-
-			// Subscribe to channel changes
-			const channelSubscription = supabase
-				.channel("channel-changes")
-				.on(
-					"postgres_changes",
-					{
-						event: "*",
-						schema: "public",
-						table: "channels",
-						filter: `workspace_id=eq.${workspaceId}`,
-					},
-					async () => {
-						const { data: updatedChannels } = await supabase
-							.from("channels")
-							.select("id, name, slug")
-							.eq("workspace_id", workspaceId)
-							.order("name");
-
-						setChannels(updatedChannels || []);
-					},
-				)
-				.subscribe();
 
 			// Subscribe to conversation changes
 			const conversationSubscription = supabase
@@ -176,18 +138,13 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 				)
 				.subscribe();
 
-			// Cleanup subscriptions
 			return () => {
-				channelSubscription.unsubscribe();
 				conversationSubscription.unsubscribe();
 			};
 		}
 
-		loadData();
+		loadInitialData();
 	}, [workspaceId, supabase]);
-
-	// Get display name in order of preference: display_name -> full_name -> 'User'
-	// const displayName = profile?.display_name || profile?.full_name || "User";
 
 	return (
 		<div className="w-64 bg-custom-background-secondary border-r border-custom-ui-medium flex flex-col">
@@ -319,6 +276,12 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 					</Button>
 				</div>
 			</div>
+
+			{/* Background Channel Prefetcher */}
+			<ChannelPrefetcher
+				workspaceId={workspaceId}
+				onChannelsLoaded={setChannels}
+			/>
 		</div>
 	);
 }

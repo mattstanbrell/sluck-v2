@@ -268,6 +268,9 @@ CREATE INDEX conversation_participants_user_id_idx ON conversation_participants(
 ### Messages
 
 ```sql
+-- Update: Enable pgvector extension if not already present (required for vector similarity)
+CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
+
 CREATE TABLE messages (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
@@ -278,11 +281,21 @@ CREATE TABLE messages (
   parent_id UUID REFERENCES messages(id) ON DELETE CASCADE,
   reply_count INTEGER NOT NULL DEFAULT 0,
   reply_user_ids UUID[] NOT NULL DEFAULT '{}',
+  embedding vector(1024), -- Vector embedding of message content for semantic search
   CONSTRAINT message_container_check CHECK (
-    (conversation_id IS NULL AND channel_id IS NOT NULL) OR
+    (conversation_id IS NULL AND channel_id IS NOT NULL) 
+    OR 
     (conversation_id IS NOT NULL AND channel_id IS NULL)
   )
 );
+
+-- Updated index creation for similarity search: switched from ivfflat to HNSW
+-- Previous:
+--   CREATE INDEX messages_embedding_idx ON messages USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+
+CREATE INDEX messages_embedding_idx
+ON messages
+USING hnsw (embedding vector_cosine_ops);
 
 -- Thread reply tracking trigger function
 CREATE OR REPLACE FUNCTION update_parent_thread_info()

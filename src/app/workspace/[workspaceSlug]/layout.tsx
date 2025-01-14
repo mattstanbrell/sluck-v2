@@ -1,34 +1,32 @@
-import { createClient } from '@/utils/supabase/server'
-import { Sidebar } from '@/components/workspace/Sidebar'
-import { notFound } from 'next/navigation'
+import { createClient } from "@/utils/supabase/server";
+import { Sidebar } from "@/components/workspace/Sidebar";
+import { notFound } from "next/navigation";
 
 export default async function WorkspaceLayout({
-  children,
-  params
+	children,
+	params,
 }: {
-  children: React.ReactNode
-  params: Promise<{ workspaceSlug: string }>
+	children: React.ReactNode;
+	params: Promise<{ workspaceSlug: string }>;
 }) {
-  const { workspaceSlug } = await params
-  const supabase = await createClient()
+	const { workspaceSlug } = await params;
+	const supabase = await createClient();
 
-  // Get workspace from slug
-  const { data: workspace } = await supabase
-    .from('workspaces')
-    .select('id')
-    .eq('slug', workspaceSlug)
-    .single()
+	// Get workspace from slug
+	const { data: workspace } = await supabase
+		.from("workspaces")
+		.select("id")
+		.eq("slug", workspaceSlug)
+		.single();
 
-  if (!workspace) {
-    notFound()
-  }
+	if (!workspace) {
+		notFound();
+	}
 
-  return (
-    <div className="flex h-screen">
-      <Sidebar workspaceId={workspace.id} />
-      <main className="flex-1 overflow-auto">
-        {children}
-      </main>
-    </div>
-  )
-} 
+	return (
+		<div className="flex h-screen">
+			<Sidebar workspaceId={workspace.id} />
+			<main className="flex-1 overflow-auto">{children}</main>
+		</div>
+	);
+}

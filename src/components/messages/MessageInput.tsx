@@ -23,6 +23,9 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@/components/ui/popover";
+import { createMessage } from "@/app/actions/message";
+import type { MessageChainContext } from "@/types/message";
+import type { Database } from "@/lib/database.types";
 
 // Add a helper function to generate a unique key for files
 const generateFileKey = (file: File, index: number) => {
@@ -34,6 +37,10 @@ interface MessageInputProps {
 	conversationId?: string;
 	parentId?: string;
 }
+
+type ChainMessage = Database["public"]["Tables"]["messages"]["Row"] & {
+	profiles: Database["public"]["Tables"]["profiles"]["Row"];
+};
 
 export function MessageInput({
 	channelId,
@@ -173,62 +180,225 @@ export function MessageInput({
 		let messageId: string | null = null;
 
 		try {
+			console.log("[MessageInput] Getting user profile...");
 			const {
 				data: { user },
-				error: userError,
 			} = await supabase.auth.getUser();
-			if (userError) throw userError;
-			if (!user) throw new Error("Not authenticated");
+			if (!user) {
+				throw new Error("Not authenticated");
+			}
 
-			// Insert the message first
-			const { data: message, error: messageError } = await supabase
-				.from("messages")
-				.insert({
-					content: content.trim(),
-					channel_id: channelId ?? null,
-					conversation_id: conversationId ?? null,
-					parent_id: parentId ?? null,
-					user_id: user.id,
-				})
-				.select()
+			const { data: profile, error: profileError } = await supabase
+				.from("profiles")
+				.select("id, full_name, display_name")
+				.eq("id", user.id)
 				.single();
 
-			if (messageError) throw messageError;
+			if (profileError) {
+				console.error("[MessageInput] Profile query error:", profileError);
+				throw new Error("Failed to get user profile");
+			}
+
+			if (!profile) {
+				console.error("[MessageInput] No profile found");
+				throw new Error("Failed to get user profile");
+			}
+
+			console.log("[MessageInput] Got profile:", profile);
+
+			// Round current time to nearest minute for the current message
+			const now = new Date();
+			const nearestMinute = new Date(Math.round(now.getTime() / 60000) * 60000);
+
+			console.log("[MessageInput] Getting latest message...");
+			// Get messages in the current chain
+			const { data: latestMessage, error: latestMessageError } = await supabase
+				.from("messages")
+				.select(`
+					user_id,
+					created_at
+				`)
+				.eq(
+					channelId ? "channel_id" : "conversation_id",
+					channelId || conversationId,
+				)
+				.order("created_at", { ascending: false })
+				.limit(1);
+
+			if (latestMessageError) {
+				console.error(
+					"[MessageInput] Latest message query error:",
+					latestMessageError,
+				);
+			} else {
+				console.log("[MessageInput] Latest message:", latestMessage);
+			}
+
+			// Get channel name if in a channel
+			let channelName = null;
+			if (channelId) {
+				console.log("[MessageInput] Getting channel name for:", channelId);
+				const { data: channel, error: channelError } = await supabase
+					.from("channels")
+					.select("name")
+					.eq("id", channelId)
+					.single();
+
+				if (channelError) {
+					console.error("[MessageInput] Channel query error:", channelError);
+				} else {
+					console.log("[MessageInput] Got channel:", channel);
+					channelName = channel?.name || null;
+				}
+			}
+
+			// Get recipient name if in a DM
+			let recipientName = null;
+			if (conversationId) {
+				console.log(
+					"[MessageInput] Getting recipient for conversation:",
+					conversationId,
+				);
+				const { data: participants, error: participantsError } = await supabase
+					.from("conversation_participants")
+					.select(`
+						profiles:user_id (
+							id,
+							display_name,
+							full_name
+						)
+					`)
+					.eq("conversation_id", conversationId)
+					.neq("user_id", profile.id);
+
+				if (participantsError) {
+					console.error(
+						"[MessageInput] Participants query error:",
+						participantsError,
+					);
+				} else {
+					console.log("[MessageInput] Got participants:", participants);
+					const recipient = participants?.[0]?.profiles;
+					if (recipient) {
+						recipientName =
+							recipient.display_name || recipient.full_name || null;
+					}
+				}
+			}
+
+			console.log("[MessageInput] Getting chain messages...");
+			// If we found a latest message, get all consecutive messages from that user
+			const { data: chainMessages, error: chainMessagesError } = await supabase
+				.from("messages")
+				.select(`
+					id,
+					content,
+					created_at,
+					channel_id,
+					conversation_id,
+					profiles (
+						id,
+						full_name,
+						display_name
+					)
+				`)
+				.eq(
+					channelId ? "channel_id" : "conversation_id",
+					channelId || conversationId,
+				)
+				.eq("user_id", latestMessage?.[0]?.user_id || profile.id)
+				.lt(
+					"created_at",
+					latestMessage?.[0]?.created_at || new Date().toISOString(),
+				)
+				.order("created_at", { ascending: false });
+
+			if (chainMessagesError) {
+				console.error(
+					"[MessageInput] Chain messages query error:",
+					chainMessagesError,
+				);
+			} else {
+				console.log(
+					"[MessageInput] Got chain messages:",
+					chainMessages?.length || 0,
+				);
+			}
+
+			// Create message context
+			const messageContext: MessageChainContext = {
+				currentMessage: {
+					content: content.trim(),
+					timestamp: nearestMinute,
+					sender: {
+						id: profile.id,
+						displayName: profile.display_name || profile.full_name,
+					},
+					channelId: channelId || null,
+					channelName,
+					conversationId: conversationId || null,
+					recipientName,
+				},
+				chainMessages: (chainMessages || []).map((msg) => ({
+					content: msg.content,
+					// Round down to minute for chain messages
+					timestamp: new Date(
+						Math.floor(new Date(msg.created_at).getTime() / 60000) * 60000,
+					),
+					sender: {
+						id: msg.profiles?.id,
+						displayName: msg.profiles?.display_name || msg.profiles?.full_name,
+					},
+					channelId: msg.channel_id,
+					channelName, // Use same channel name for all messages in chain
+					conversationId: msg.conversation_id,
+					recipientName, // Use same recipient name for all messages in chain
+				})),
+			};
+
+			console.log("[MessageInput] Creating message with context:", {
+				content: content.trim(),
+				channelId,
+				conversationId,
+				messageContext,
+			});
+
+			// Create message using server action
+			const message = await createMessage({
+				content: content.trim(),
+				channelId,
+				conversationId,
+				parentId,
+				messageContext,
+			});
 			messageId = message.id;
+			console.log("[MessageInput] Message created:", message);
 
 			// Upload any pending files
 			if (pendingFiles.length > 0) {
 				try {
+					console.log("[MessageInput] Uploading files...");
 					await Promise.all(
 						pendingFiles.map((file) => uploadFile(file, message.id)),
 					);
+					console.log("[MessageInput] Files uploaded successfully");
 				} catch (uploadError) {
+					console.error("[MessageInput] File upload error:", uploadError);
 					// If any file upload fails, delete the message and throw the error
 					if (messageId) {
+						console.log(
+							"[MessageInput] Deleting message due to file upload error",
+						);
 						await supabase.from("messages").delete().eq("id", messageId);
 					}
 					throw uploadError;
 				}
 			}
 
-			// Update conversation's last_message_at if it's a DM
-			if (conversationId) {
-				await supabase
-					.from("conversations")
-					.update({
-						last_message_at: new Date().toISOString(),
-					})
-					.eq("id", conversationId);
-			}
-
 			setContent("");
 			setPendingFiles([]);
 		} catch (error) {
 			console.error("[MessageInput] Error sending message:", error);
-			// If we created a message but something failed after, clean it up
-			if (messageId) {
-				await supabase.from("messages").delete().eq("id", messageId);
-			}
 			setError(
 				error instanceof Error ? error.message : "Failed to send message",
 			);

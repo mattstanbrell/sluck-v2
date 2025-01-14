@@ -35,3 +35,25 @@ export interface MessageInsertPayload {
 		content: string;
 	};
 }
+
+export interface MessageContext {
+	content: string;
+	timestamp: Date;
+	sender: {
+		id: string;
+		displayName: string;
+	};
+	channelId: string | null;
+	channelName: string | null;
+	conversationId: string | null;
+	recipientName: string | null;
+}
+
+export interface MessageChainContext {
+	currentMessage: MessageContext & {
+		timestamp: Date;
+	};
+	chainMessages: (MessageContext & {
+		timestamp: Date;
+	})[];
+}

@@ -10,7 +10,7 @@ export default async function ChannelPage({
 	const { workspaceSlug, channelSlug } = await params;
 	const supabase = await createClient();
 
-	// Get workspace ID from slug
+	// Get workspace ID from slug - this is essential for authorization
 	const { data: workspace } = await supabase
 		.from("workspaces")
 		.select("id, name")
@@ -21,7 +21,7 @@ export default async function ChannelPage({
 		notFound();
 	}
 
-	// Get channel from slug
+	// Get only the essential channel data needed for initial render
 	const { data: channel } = await supabase
 		.from("channels")
 		.select("id, name, description")
