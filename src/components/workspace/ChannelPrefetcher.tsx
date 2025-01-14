@@ -6,7 +6,10 @@ import type { ChannelBasic } from "@/types/channel";
 
 interface ChannelPrefetcherProps {
 	workspaceId: string;
-	onChannelsLoaded: (channels: ChannelBasic[]) => void;
+	onChannelsLoaded: (
+		joinedChannels: ChannelBasic[],
+		unjoinedChannels: ChannelBasic[],
+	) => void;
 }
 
 export function ChannelPrefetcher({
@@ -19,20 +22,48 @@ export function ChannelPrefetcher({
 		async function prefetchChannels() {
 			console.log("[ChannelPrefetcher] Starting background fetch for channels");
 
-			const { data: channels, error } = await supabase
+			// Get all channels
+			const { data: allChannels, error: channelsError } = await supabase
 				.from("channels")
 				.select("id, name, slug, description")
 				.eq("workspace_id", workspaceId)
 				.order("name");
 
-			if (error) {
-				console.error("[ChannelPrefetcher] Error fetching channels:", error);
+			if (channelsError) {
+				console.error(
+					"[ChannelPrefetcher] Error fetching channels:",
+					channelsError,
+				);
 				return;
 			}
 
-			if (channels) {
-				console.log("[ChannelPrefetcher] Loaded channels:", channels.length);
-				onChannelsLoaded(channels);
+			// Get joined channels
+			const { data: joinedChannelIds, error: membershipError } = await supabase
+				.from("channel_members")
+				.select("channel_id")
+				.eq("user_id", (await supabase.auth.getUser()).data.user?.id);
+
+			if (membershipError) {
+				console.error(
+					"[ChannelPrefetcher] Error fetching channel memberships:",
+					membershipError,
+				);
+				return;
+			}
+
+			if (allChannels) {
+				const joinedIds = new Set(joinedChannelIds?.map((m) => m.channel_id));
+				const joinedChannels = allChannels.filter((c) => joinedIds.has(c.id));
+				const unjoinedChannels = allChannels.filter(
+					(c) => !joinedIds.has(c.id),
+				);
+
+				console.log("[ChannelPrefetcher] Loaded channels:", {
+					joined: joinedChannels.length,
+					unjoined: unjoinedChannels.length,
+				});
+
+				onChannelsLoaded(joinedChannels, unjoinedChannels);
 			}
 
 			// Set up subscription for real-time updates
@@ -53,8 +84,22 @@ export function ChannelPrefetcher({
 							.eq("workspace_id", workspaceId)
 							.order("name");
 
-						if (updatedChannels) {
-							onChannelsLoaded(updatedChannels);
+						const { data: updatedMemberships } = await supabase
+							.from("channel_members")
+							.select("channel_id")
+							.eq("user_id", (await supabase.auth.getUser()).data.user?.id);
+
+						if (updatedChannels && updatedMemberships) {
+							const joinedIds = new Set(
+								updatedMemberships.map((m) => m.channel_id),
+							);
+							const joinedChannels = updatedChannels.filter((c) =>
+								joinedIds.has(c.id),
+							);
+							const unjoinedChannels = updatedChannels.filter(
+								(c) => !joinedIds.has(c.id),
+							);
+							onChannelsLoaded(joinedChannels, unjoinedChannels);
 						}
 					},
 				)

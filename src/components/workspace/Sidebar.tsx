@@ -17,6 +17,7 @@ import type {
 } from "@/types/conversation";
 import type { ChannelBasic } from "@/types/channel";
 import type { WorkspaceBasic } from "@/types/workspace";
+import { UnjoinedChannels } from "./UnjoinedChannels";
 
 type ConversationResponse = ConversationWithParticipants;
 type Conversation = ConversationWithParticipant;
@@ -24,7 +25,8 @@ type UserProfile = ProfileDisplay;
 
 export function Sidebar({ workspaceId }: { workspaceId: string }) {
 	const [workspace, setWorkspace] = useState<WorkspaceBasic | null>(null);
-	const [channels, setChannels] = useState<ChannelBasic[]>([]);
+	const [joinedChannels, setJoinedChannels] = useState<ChannelBasic[]>([]);
+	const [unjoinedChannels, setUnjoinedChannels] = useState<ChannelBasic[]>([]);
 	const [conversations, setConversations] = useState<Conversation[]>([]);
 	const [profile, setProfile] = useState<UserProfile | null>(null);
 	const supabase = createClient();
@@ -174,7 +176,7 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 					</div>
 				</div>
 				<nav className="space-y-1">
-					{channels.map((channel) => {
+					{joinedChannels.map((channel) => {
 						const channelUrl = `/workspace/${workspace?.slug}/channel/${channel.slug}`;
 						const isActive = pathname === channelUrl;
 
@@ -205,6 +207,12 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 							</Link>
 						);
 					})}
+
+					{/* Unjoined Channels */}
+					<UnjoinedChannels
+						channels={unjoinedChannels}
+						workspaceSlug={workspace?.slug || ""}
+					/>
 				</nav>
 
 				{/* Direct Messages Section */}
@@ -280,7 +288,10 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 			{/* Background Channel Prefetcher */}
 			<ChannelPrefetcher
 				workspaceId={workspaceId}
-				onChannelsLoaded={setChannels}
+				onChannelsLoaded={(joined, unjoined) => {
+					setJoinedChannels(joined);
+					setUnjoinedChannels(unjoined);
+				}}
 			/>
 		</div>
 	);
