@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useMemo } from "react";
+import { useCallback, useEffect, useRef, useState, useMemo, memo } from "react";
 import { createClient } from "@/utils/supabase/client";
 import { useMessageCache } from "./MessageCache";
 import type { Message, MessageGroup } from "@/types/message";
@@ -11,6 +11,24 @@ import { UserAvatar } from "../ui/UserAvatar";
 import { Button } from "@/components/ui/button";
 import { ListEnd } from "lucide-react";
 import { ThreadRepliesIndicator } from "./ThreadRepliesIndicator";
+
+function debounce<T extends (...args: unknown[]) => void>(
+	fn: T,
+	delay: number,
+): { (...args: Parameters<T>): void; cancel: () => void } {
+	let timeoutId: ReturnType<typeof setTimeout>;
+
+	function debouncedFn(...args: Parameters<T>) {
+		clearTimeout(timeoutId);
+		timeoutId = setTimeout(() => fn(...args), delay);
+	}
+
+	debouncedFn.cancel = () => {
+		clearTimeout(timeoutId);
+	};
+
+	return debouncedFn;
+}
 
 const supabase = createClient();
 
@@ -50,6 +68,9 @@ function groupConsecutiveMessages(messages: Message[]): MessageGroup[] {
 	return groups;
 }
 
+// Static ref that persists across all instances
+const INITIAL_LOAD_DONE = { current: false };
+
 export function MessageList({
 	channelId,
 	conversationId,
@@ -67,24 +88,17 @@ export function MessageList({
 }) {
 	const { getChannelMessages, updateChannelMessages } = useMessageCache();
 	const [isInitialLoad, setIsInitialLoad] = useState(true);
+	const [isLoading, setIsLoading] = useState(false);
 	const messagesEndRef = useRef<HTMLDivElement>(null);
+	const prevChannelIdRef = useRef<string | undefined>(undefined);
+	const lastLoggedStateRef = useRef<string>("");
 
-	// Get messages from cache or fetch them
-	const messages = channelId ? getChannelMessages(channelId) : [];
-	console.log(`[MessageList] Rendering channel ${channelId}`, {
-		messageCount: messages.length,
-		fromCache: messages.length > 0,
-		isInitialLoad,
-	});
+	// Get messages from cache
+	const messages = channelId ? getChannelMessages(channelId, parentId) : [];
+	const hasMessages = messages.length > 0;
 
 	// Build a map of profiles for the thread replies indicator
 	const profilesMap = useMemo(() => {
-		console.log("[MessageList] Building profiles map", {
-			messageCount: messages.length,
-			uniqueProfiles: new Set(
-				messages.map((m) => m.profile?.id).filter(Boolean),
-			).size,
-		});
 		const map: Record<string, ProfileWithId> = {};
 		for (const m of messages) {
 			if (m.profile?.id) {
@@ -94,81 +108,152 @@ export function MessageList({
 		return map;
 	}, [messages]);
 
+	// Group messages into chains
+	const messageGroups = useMemo(() => {
+		return groupConsecutiveMessages(messages);
+	}, [messages]);
+
 	// Ensure we scroll to bottom only on new messages or initial load
 	const scrollToBottom = useCallback(() => {
 		messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
 	}, []);
 
+	// Only log cache status when it changes
+	useEffect(() => {
+		if (!channelId) return;
+
+		const currentState = `${channelId}-${messages.length}-${isLoading}`;
+		if (currentState !== lastLoggedStateRef.current) {
+			lastLoggedStateRef.current = currentState;
+
+			const status = isLoading ? "loading" : hasMessages ? "ready" : "empty";
+			console.log("[MessageList] Status:", {
+				channel: channelId,
+				messages: hasMessages ? messages.length : "none",
+				status,
+				cached: hasMessages,
+				initialLoadDone: INITIAL_LOAD_DONE.current,
+			});
+		}
+	}, [channelId, messages.length, isLoading, hasMessages]);
+
+	// Track when messages are actually ready to view
+	useEffect(() => {
+		if (messages.length > 0 && !isLoading && channelId) {
+			const isChannelSwitch = channelId !== prevChannelIdRef.current;
+			console.log("[MessageList] Ready to view:", {
+				channel: channelId,
+				messages: messages.length,
+				fromCache: hasMessages && !isChannelSwitch,
+			});
+		}
+	}, [messages.length, isLoading, channelId, hasMessages]);
+
 	// Initial load scroll
 	useEffect(() => {
 		if (isInitialLoad && messages.length > 0) {
-			console.log("[MessageList] Initial load scroll", {
-				messageCount: messages.length,
-			});
+			console.log("[MessageList] First messages loaded, scrolling to bottom");
 			scrollToBottom();
 			setIsInitialLoad(false);
 		}
 	}, [isInitialLoad, messages.length, scrollToBottom]);
 
-	// Fetch messages if not in cache
+	// Fetch messages if needed
 	useEffect(() => {
-		if (!channelId || messages.length > 0) return;
+		if (!channelId) return;
+
+		const isChannelSwitch = channelId !== prevChannelIdRef.current;
+		const needsInitialLoad = !INITIAL_LOAD_DONE.current;
+
+		// Only fetch if:
+		// 1. This is our very first channel load ever, or
+		// 2. We're switching channels AND don't have the messages cached
+		const shouldFetch = needsInitialLoad || (isChannelSwitch && !hasMessages);
+
+		if (!shouldFetch) {
+			if (hasMessages && isChannelSwitch) {
+				console.log(
+					"[MessageList] Using cached messages for channel switch:",
+					channelId,
+				);
+			}
+			return;
+		}
+
+		prevChannelIdRef.current = channelId;
 
 		async function fetchMessages() {
-			console.log(`[MessageList] Fetching messages for channel ${channelId}`, {
-				parentId,
-				isMainView,
+			console.log("[MessageList] Fetching messages:", {
+				channel: channelId,
+				reason: needsInitialLoad
+					? "first time load"
+					: "channel switch - not cached",
 			});
 
-			const query = supabase
-				.from("messages")
-				.select(
-					`*,
-					profile:profiles (
-						id,
-						full_name,
-						display_name,
-						avatar_url,
-						avatar_color,
-						avatar_cache
-					),
-					files (
-						id,
-						file_type,
-						file_name,
-						file_size,
-						file_url
-					)`,
-				)
-				.eq("channel_id", channelId)
-				.order("created_at", { ascending: true });
+			setIsLoading(true);
+			try {
+				const query = supabase
+					.from("messages")
+					.select(
+						`*,
+						profile:profiles (
+							id,
+							full_name,
+							display_name,
+							avatar_url,
+							avatar_color,
+							avatar_cache
+						),
+						files (
+							id,
+							file_type,
+							file_name,
+							file_size,
+							file_url
+						)`,
+					)
+					.eq("channel_id", channelId)
+					.order("created_at", { ascending: true });
 
-			if (parentId) {
-				query.eq("parent_id", parentId);
-			} else if (isMainView) {
-				query.is("parent_id", null);
-			}
+				if (parentId) {
+					query.eq("parent_id", parentId);
+				} else if (isMainView) {
+					query.is("parent_id", null);
+				}
 
-			const { data, error } = await query;
+				const { data, error } = await query;
 
-			if (error) {
-				console.error("[MessageList] Error fetching messages:", error);
-			} else if (data && channelId) {
-				console.log(`[MessageList] Successfully fetched messages`, {
-					channelId,
-					messageCount: data.length,
-					firstMessageId: data[0]?.id,
-					lastMessageId: data[data.length - 1]?.id,
-				});
-				updateChannelMessages(channelId, data as Message[]);
+				if (error) {
+					console.error("[MessageList] Failed to load messages:", error);
+				} else if (data && channelId) {
+					console.log("[MessageList] Database returned:", {
+						channel: channelId,
+						messages: data.length,
+					});
+					updateChannelMessages(channelId, data as Message[], parentId);
+
+					if (needsInitialLoad) {
+						INITIAL_LOAD_DONE.current = true;
+						console.log(
+							"[MessageList] First load complete, starting background prefetch",
+						);
+					}
+				}
+			} finally {
+				setIsLoading(false);
 			}
 		}
 
 		fetchMessages();
-	}, [channelId, messages.length, parentId, isMainView, updateChannelMessages]);
+	}, [channelId, hasMessages, parentId, isMainView, updateChannelMessages]);
 
-	// Group messages into chains
-	const messageGroups = groupConsecutiveMessages(messages);
+	if (isLoading && !hasMessages) {
+		return (
+			<div className="flex-1 flex items-center justify-center">
+				<div className="text-custom-text-secondary">Loading messages...</div>
+			</div>
+		);
+	}
 
 	return (
 		<div
@@ -178,7 +263,7 @@ export function MessageList({
 		>
 			{messageGroups.map((chain, i) => (
 				<ChainGroup
-					key={`chain-${chain.userId}-${i}`}
+					key={`${chain.userId}-${i}`}
 					chain={chain}
 					onThreadClick={onThreadClick}
 					showThreadButton={isMainView}
@@ -191,7 +276,7 @@ export function MessageList({
 	);
 }
 
-function ChainGroup({
+const ChainGroup = memo(function ChainGroup({
 	chain,
 	onThreadClick,
 	showThreadButton,
@@ -207,85 +292,72 @@ function ChainGroup({
 	const firstMessage = chain.messages[0];
 	if (!firstMessage?.profile) return null;
 
-	const [isMounted, setIsMounted] = useState(false);
-	const [lineStyle, setLineStyle] = useState<React.CSSProperties>({});
+	const [lineStyle, setLineStyle] = useState<React.CSSProperties>({
+		height: 0,
+	});
+	const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
 	const chainRef = useRef<HTMLDivElement>(null);
+	const resizeObserverRef = useRef<ResizeObserver | null>(null);
 	const showChainLine = chain.messages.length > 1;
 
-	useEffect(() => {
-		// Trigger mount animation after a small delay to ensure DOM is ready
-		const timer = setTimeout(() => {
-			setIsMounted(true);
-		}, 100);
-		return () => clearTimeout(timer);
-	}, []);
+	const updateLineHeight = useCallback(() => {
+		if (!showChainLine || !chainRef.current) return;
 
+		const chainRect = chainRef.current?.getBoundingClientRect();
+		if (!chainRect) return;
+
+		const startY = chainRect.top + 40; // Avatar offset
+		const lastDiv = chainRef.current?.querySelector("[data-last-message]");
+		if (!lastDiv) {
+			setLineStyle({ height: 0 });
+			return;
+		}
+
+		const lastRect = (lastDiv as HTMLElement).getBoundingClientRect();
+		const lastBottom = lastRect.bottom;
+		const totalHeight = lastBottom - startY;
+
+		if (totalHeight <= 0) {
+			setLineStyle({ height: 0 });
+			return;
+		}
+
+		setLineStyle({
+			height: `${totalHeight}px`,
+			background: firstMessage.profile.avatar_color || "rgb(20, 148, 132)",
+			maskImage: "linear-gradient(to bottom, black, transparent)",
+			WebkitMaskImage: "linear-gradient(to bottom, black, transparent)",
+		});
+	}, [showChainLine, firstMessage.profile.avatar_color]);
+
+	// Set up resize observer
 	useEffect(() => {
 		if (!showChainLine || !chainRef.current) return;
 
-		const updateLineHeight = () => {
-			console.log("[ChainGroup] Updating chain line", {
-				messageCount: chain.messages.length,
-				userId: chain.userId,
-			});
-			const chainRect = chainRef.current?.getBoundingClientRect();
-			if (!chainRect) return;
-
-			const startY = chainRect.top + 40; // Avatar offset
-
-			const lastDiv = chainRef.current?.querySelector("[data-last-message]");
-			if (!lastDiv) {
-				console.log("[ChainGroup] No last message found for chain line");
-				setLineStyle({ display: "none" });
-				return;
-			}
-			const lastRect = (lastDiv as HTMLElement).getBoundingClientRect();
-			const lastBottom = lastRect.bottom;
-
-			const totalHeight = lastBottom - startY;
-			if (totalHeight <= 0) {
-				console.log("[ChainGroup] Invalid chain line height", { totalHeight });
-				setLineStyle({ display: "none" });
-				return;
-			}
-
-			console.log("[ChainGroup] Setting chain line style", {
-				height: totalHeight,
-				color: firstMessage.profile.avatar_color || "rgb(20, 148, 132)",
-			});
-			setLineStyle({
-				height: isMounted ? `${totalHeight}px` : "0px",
-				background: firstMessage.profile.avatar_color || "rgb(20, 148, 132)",
-				maskImage: "linear-gradient(to bottom, black, transparent)",
-				WebkitMaskImage: "linear-gradient(to bottom, black, transparent)",
-			});
-		};
-
+		// Initial update
 		updateLineHeight();
 
-		const resizeObserver = new ResizeObserver(() => {
-			console.log("[ChainGroup] Resize detected, updating chain line");
-			updateLineHeight();
-		});
-		resizeObserver.observe(chainRef.current);
+		// Set up resize observer with debounced callback
+		const debouncedUpdate = debounce(updateLineHeight, 100);
+		resizeObserverRef.current = new ResizeObserver(debouncedUpdate);
+		resizeObserverRef.current.observe(chainRef.current);
 
 		return () => {
-			console.log("[ChainGroup] Cleaning up chain line observer");
-			resizeObserver.disconnect();
+			debouncedUpdate.cancel();
+			if (resizeObserverRef.current) {
+				resizeObserverRef.current.disconnect();
+				resizeObserverRef.current = null;
+			}
 		};
-	}, [
-		showChainLine,
-		firstMessage.profile.avatar_color,
-		isMounted,
-		chain.messages.length,
-		chain.userId,
-	]);
+	}, [showChainLine, updateLineHeight]);
 
 	return (
 		<div ref={chainRef} className="space-y-0.5 relative">
 			{/* First message row (with avatar) */}
 			<div
 				className="group relative flex items-start gap-4 py-0.5 px-8 -mx-8 transition-colors"
+				onMouseEnter={() => setHoveredMessageId(firstMessage.id)}
+				onMouseLeave={() => setHoveredMessageId(null)}
 				style={
 					{
 						["--hover-bg" as string]:
@@ -331,21 +403,44 @@ function ChainGroup({
 							className="ml-2 text-custom-text-tertiary"
 						/>
 					</div>
-					<MessageContent
-						content={firstMessage.content}
-						files={firstMessage.files}
-					/>
-					{showThreadButton &&
-						onThreadClick &&
-						firstMessage.reply_count > 0 && (
-							<ThreadRepliesIndicator
-								messageId={firstMessage.id}
-								replyUserIds={firstMessage.reply_user_ids}
-								profiles={profiles}
-								onClick={() => onThreadClick(firstMessage.id)}
-								highlightedMessageId={highlightedMessageId}
-							/>
-						)}
+					<div className="relative">
+						<MessageContent
+							content={firstMessage.content}
+							files={firstMessage.files}
+						/>
+						{showThreadButton &&
+							onThreadClick &&
+							firstMessage.reply_count > 0 && (
+								<ThreadRepliesIndicator
+									messageId={firstMessage.id}
+									replyUserIds={firstMessage.reply_user_ids}
+									profiles={profiles}
+									onClick={() => onThreadClick(firstMessage.id)}
+									highlightedMessageId={highlightedMessageId}
+								/>
+							)}
+						{showThreadButton &&
+							onThreadClick &&
+							!firstMessage.reply_count &&
+							hoveredMessageId === firstMessage.id &&
+							highlightedMessageId !== firstMessage.id && (
+								<div
+									className="absolute left-0 h-6 z-20 w-fit"
+									style={{ bottom: "-22px" }}
+									onMouseEnter={() => setHoveredMessageId(firstMessage.id)}
+								>
+									<Button
+										variant="ghost"
+										size="sm"
+										onClick={() => onThreadClick(firstMessage.id)}
+										className="text-custom-text-secondary hover:text-custom-text border border-custom-ui-medium bg-custom-background-secondary hover:bg-custom-ui-faint transition-colors"
+									>
+										<ListEnd className="h-4 w-4 mr-1 -scale-x-100" />
+										Reply in thread
+									</Button>
+								</div>
+							)}
+					</div>
 				</div>
 			</div>
 
@@ -357,6 +452,8 @@ function ChainGroup({
 						key={message.id}
 						data-last-message={isLast ? true : undefined}
 						className="group relative py-0.5 px-8 -mx-8 transition-colors"
+						onMouseEnter={() => setHoveredMessageId(message.id)}
+						onMouseLeave={() => setHoveredMessageId(null)}
 						style={
 							{
 								["--hover-bg" as string]:
@@ -376,20 +473,48 @@ function ChainGroup({
 							<div className="absolute left-[3.5rem] top-0 bottom-0 -translate-x-1/2 flex items-center pr-2 opacity-0 group-hover:opacity-100">
 								<MessageTimestamp timestamp={message.created_at} hideColon />
 							</div>
-							<MessageContent content={message.content} files={message.files} />
-							{showThreadButton && onThreadClick && message.reply_count > 0 && (
-								<ThreadRepliesIndicator
-									messageId={message.id}
-									replyUserIds={message.reply_user_ids}
-									profiles={profiles}
-									onClick={() => onThreadClick(message.id)}
-									highlightedMessageId={highlightedMessageId}
+							<div className="relative">
+								<MessageContent
+									content={message.content}
+									files={message.files}
 								/>
-							)}
+								{showThreadButton &&
+									onThreadClick &&
+									message.reply_count > 0 && (
+										<ThreadRepliesIndicator
+											messageId={message.id}
+											replyUserIds={message.reply_user_ids}
+											profiles={profiles}
+											onClick={() => onThreadClick(message.id)}
+											highlightedMessageId={highlightedMessageId}
+										/>
+									)}
+								{showThreadButton &&
+									onThreadClick &&
+									!message.reply_count &&
+									hoveredMessageId === message.id &&
+									highlightedMessageId !== message.id && (
+										<div
+											className="absolute left-0 h-6 z-20 w-fit"
+											style={{ bottom: "-22px" }}
+											onMouseEnter={() => setHoveredMessageId(message.id)}
+										>
+											<Button
+												variant="ghost"
+												size="sm"
+												onClick={() => onThreadClick(message.id)}
+												className="text-custom-text-secondary hover:text-custom-text border border-custom-ui-medium bg-custom-background-secondary hover:bg-custom-ui-faint transition-colors"
+											>
+												<ListEnd className="h-4 w-4 mr-1 -scale-x-100" />
+												Reply in thread
+											</Button>
+										</div>
+									)}
+							</div>
 						</div>
 					</div>
 				);
 			})}
 		</div>
 	);
-}
+});

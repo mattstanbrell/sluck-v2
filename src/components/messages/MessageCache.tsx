@@ -1,18 +1,31 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import {
+	createContext,
+	useContext,
+	useEffect,
+	useState,
+	useCallback,
+} from "react";
 import { createClient } from "@/utils/supabase/client";
 import type { Message } from "@/types/message";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
 interface MessageCache {
-	[key: string]: Message[];
+	[key: string]: {
+		mainView: Message[];
+		threads: Record<string, Message[]>;
+	};
 }
 
 interface MessageCacheContextType {
 	messages: MessageCache;
-	getChannelMessages: (channelId: string) => Message[];
-	updateChannelMessages: (channelId: string, messages: Message[]) => void;
+	getChannelMessages: (channelId: string, parentId?: string) => Message[];
+	updateChannelMessages: (
+		channelId: string,
+		messages: Message[],
+		parentId?: string,
+	) => void;
 }
 
 const MessageCacheContext = createContext<MessageCacheContextType | null>(null);
@@ -30,6 +43,7 @@ export function useMessageCache() {
 interface MessagePayload {
 	id: string;
 	channel_id: string;
+	parent_id: string | null;
 }
 
 export function MessageCacheProvider({
@@ -38,30 +52,55 @@ export function MessageCacheProvider({
 	const [messages, setMessages] = useState<MessageCache>({});
 	const supabase = createClient();
 
-	const getChannelMessages = (channelId: string) => {
-		console.log(`[MessageCache] Getting messages for channel ${channelId}`, {
-			cached: messages[channelId]?.length || 0,
-			fromCache: !!messages[channelId],
-		});
-		return messages[channelId] || [];
-	};
+	const getChannelMessages = useCallback(
+		(channelId: string, parentId?: string) => {
+			if (!messages[channelId]) return [];
 
-	const updateChannelMessages = (channelId: string, newMessages: Message[]) => {
-		console.log(`[MessageCache] Updating cache for channel ${channelId}`, {
-			messageCount: newMessages.length,
-			firstMessageId: newMessages[0]?.id,
-			lastMessageId: newMessages[newMessages.length - 1]?.id,
-		});
-		setMessages((prev) => ({
-			...prev,
-			[channelId]: newMessages,
-		}));
-	};
+			// If parentId is provided, return thread messages
+			if (parentId) {
+				return messages[channelId].threads[parentId] || [];
+			}
+
+			// Otherwise return main view messages
+			return messages[channelId].mainView || [];
+		},
+		[messages],
+	);
+
+	const updateChannelMessages = useCallback(
+		(channelId: string, newMessages: Message[], parentId?: string) => {
+			setMessages((prev) => {
+				const channelCache = prev[channelId] || { mainView: [], threads: {} };
+
+				if (parentId) {
+					// Update thread messages
+					return {
+						...prev,
+						[channelId]: {
+							...channelCache,
+							threads: {
+								...channelCache.threads,
+								[parentId]: newMessages,
+							},
+						},
+					};
+				}
+
+				// Update main view messages
+				return {
+					...prev,
+					[channelId]: {
+						...channelCache,
+						mainView: newMessages,
+					},
+				};
+			});
+		},
+		[],
+	);
 
 	// Set up global subscription for message updates
 	useEffect(() => {
-		console.log("[MessageCache] Setting up global message subscription");
-
 		const channel = supabase
 			.channel("global-message-changes")
 			.on(
@@ -72,72 +111,122 @@ export function MessageCacheProvider({
 					table: "messages",
 				},
 				async (payload: RealtimePostgresChangesPayload<MessagePayload>) => {
-					const newMessage = payload.new;
+					const newMessage = payload.new as MessagePayload;
 					if (!newMessage?.id) return;
-
-					console.log(`[MessageCache] Received realtime update`, {
-						type: payload.eventType,
-						messageId: newMessage.id,
-						channelId: newMessage.channel_id,
-					});
 
 					// Fetch the complete message data with profile and files
 					const { data: message } = await supabase
 						.from("messages")
 						.select(
 							`*,
-              profile:profiles (
-                id,
-                full_name,
-                display_name,
-                avatar_url,
-                avatar_color,
-                avatar_cache
-              ),
-              files (
-                id,
-                file_type,
-                file_name,
-                file_size,
-                file_url
-              )`,
+							profile:profiles (
+								id,
+								full_name,
+								display_name,
+								avatar_url,
+								avatar_color,
+								avatar_cache
+							),
+							files (
+								id,
+								file_type,
+								file_name,
+								file_size,
+								file_url
+							)`,
 						)
 						.eq("id", newMessage.id)
 						.single();
 
 					if (message?.channel_id) {
-						console.log(`[MessageCache] Updating message in cache`, {
-							messageId: message.id,
-							channelId: message.channel_id,
-							type: payload.eventType,
-						});
-
 						setMessages((prev) => {
-							const channelMessages = prev[message.channel_id] || [];
+							const channelCache = prev[message.channel_id] || {
+								mainView: [],
+								threads: {},
+							};
 
-							if (payload.eventType === "INSERT") {
-								return {
-									...prev,
-									[message.channel_id]: [...channelMessages, message],
-								};
-							}
+							if (message.parent_id) {
+								// Update thread messages
+								const threadMessages =
+									channelCache.threads[message.parent_id] || [];
 
-							if (payload.eventType === "UPDATE") {
-								return {
-									...prev,
-									[message.channel_id]: channelMessages.map((m) =>
-										m.id === message.id ? message : m,
-									),
-								};
-							}
+								if (payload.eventType === "INSERT") {
+									return {
+										...prev,
+										[message.channel_id]: {
+											...channelCache,
+											threads: {
+												...channelCache.threads,
+												[message.parent_id]: [...threadMessages, message],
+											},
+										},
+									};
+								}
 
-							if (payload.eventType === "DELETE") {
-								return {
-									...prev,
-									[message.channel_id]: channelMessages.filter(
-										(m) => m.id !== message.id,
-									),
-								};
+								if (payload.eventType === "UPDATE") {
+									return {
+										...prev,
+										[message.channel_id]: {
+											...channelCache,
+											threads: {
+												...channelCache.threads,
+												[message.parent_id]: threadMessages.map((m) =>
+													m.id === message.id ? message : m,
+												),
+											},
+										},
+									};
+								}
+
+								if (payload.eventType === "DELETE") {
+									return {
+										...prev,
+										[message.channel_id]: {
+											...channelCache,
+											threads: {
+												...channelCache.threads,
+												[message.parent_id]: threadMessages.filter(
+													(m) => m.id !== message.id,
+												),
+											},
+										},
+									};
+								}
+							} else {
+								// Update main view messages
+								if (payload.eventType === "INSERT") {
+									return {
+										...prev,
+										[message.channel_id]: {
+											...channelCache,
+											mainView: [...channelCache.mainView, message],
+										},
+									};
+								}
+
+								if (payload.eventType === "UPDATE") {
+									return {
+										...prev,
+										[message.channel_id]: {
+											...channelCache,
+											mainView: channelCache.mainView.map((m) =>
+												m.id === message.id ? message : m,
+											),
+										},
+									};
+								}
+
+								if (payload.eventType === "DELETE") {
+									return {
+										...prev,
+										[message.channel_id]: {
+											...channelCache,
+											mainView: channelCache.mainView.filter(
+												(m) => m.id !== message.id,
+											),
+										},
+									};
+								}
 							}
 
 							return prev;
@@ -148,19 +237,18 @@ export function MessageCacheProvider({
 			.subscribe();
 
 		return () => {
-			console.log("[MessageCache] Cleaning up global message subscription");
 			channel.unsubscribe();
 		};
 	}, [supabase]);
 
+	const value = {
+		messages,
+		getChannelMessages,
+		updateChannelMessages,
+	};
+
 	return (
-		<MessageCacheContext.Provider
-			value={{
-				messages,
-				getChannelMessages,
-				updateChannelMessages,
-			}}
-		>
+		<MessageCacheContext.Provider value={value}>
 			{children}
 		</MessageCacheContext.Provider>
 	);

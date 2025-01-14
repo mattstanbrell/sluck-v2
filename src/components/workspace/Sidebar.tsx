@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/utils/supabase/client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { CreateChannelDialog } from "./CreateChannelDialog";
@@ -32,6 +32,14 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 	const supabase = createClient();
 	const router = useRouter();
 	const pathname = usePathname();
+
+	const handleChannelsLoaded = useCallback(
+		(joined: ChannelBasic[], unjoined: ChannelBasic[]) => {
+			setJoinedChannels(joined);
+			setUnjoinedChannels(unjoined);
+		},
+		[],
+	);
 
 	useEffect(() => {
 		async function loadInitialData() {
@@ -288,10 +296,7 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 			{/* Background Channel Prefetcher */}
 			<ChannelPrefetcher
 				workspaceId={workspaceId}
-				onChannelsLoaded={(joined, unjoined) => {
-					setJoinedChannels(joined);
-					setUnjoinedChannels(unjoined);
-				}}
+				onChannelsLoaded={handleChannelsLoaded}
 			/>
 		</div>
 	);
