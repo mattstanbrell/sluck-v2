@@ -209,5 +209,19 @@ export interface Database {
 				};
 			};
 		};
+		Functions: {
+			match_messages: {
+				Args: {
+					query_embedding: number[];
+					match_threshold: number;
+					match_count: number;
+				};
+				Returns: {
+					id: string;
+					content: string;
+					similarity: number;
+				}[];
+			};
+		};
 	};
 }

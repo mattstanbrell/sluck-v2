@@ -73,14 +73,12 @@ const INITIAL_LOAD_DONE = { current: false };
 
 export function MessageList({
 	channelId,
-	conversationId,
 	parentId,
 	onThreadClick,
 	isMainView,
 	highlightedMessageId,
 }: {
 	channelId?: string;
-	conversationId?: string;
 	parentId?: string;
 	onThreadClick?: (messageId: string) => void;
 	isMainView?: boolean;
@@ -94,7 +92,9 @@ export function MessageList({
 	const lastLoggedStateRef = useRef<string>("");
 
 	// Get messages from cache
-	const messages = channelId ? getChannelMessages(channelId, parentId) : [];
+	const messages = useMemo(() => {
+		return channelId ? getChannelMessages(channelId, parentId) : [];
+	}, [channelId, getChannelMessages, parentId]);
 	const hasMessages = messages.length > 0;
 
 	// Build a map of profiles for the thread replies indicator
@@ -290,7 +290,7 @@ const ChainGroup = memo(function ChainGroup({
 	profiles: Record<string, ProfileWithId>;
 }) {
 	const firstMessage = chain.messages[0];
-	if (!firstMessage?.profile) return null;
+	const showChainLine = chain.messages.length > 1;
 
 	const [lineStyle, setLineStyle] = useState<React.CSSProperties>({
 		height: 0,
@@ -298,10 +298,9 @@ const ChainGroup = memo(function ChainGroup({
 	const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
 	const chainRef = useRef<HTMLDivElement>(null);
 	const resizeObserverRef = useRef<ResizeObserver | null>(null);
-	const showChainLine = chain.messages.length > 1;
 
 	const updateLineHeight = useCallback(() => {
-		if (!showChainLine || !chainRef.current) return;
+		if (!showChainLine || !chainRef.current || !firstMessage?.profile) return;
 
 		const chainRect = chainRef.current?.getBoundingClientRect();
 		if (!chainRect) return;
@@ -328,11 +327,11 @@ const ChainGroup = memo(function ChainGroup({
 			maskImage: "linear-gradient(to bottom, black, transparent)",
 			WebkitMaskImage: "linear-gradient(to bottom, black, transparent)",
 		});
-	}, [showChainLine, firstMessage.profile.avatar_color]);
+	}, [showChainLine, firstMessage?.profile]);
 
 	// Set up resize observer
 	useEffect(() => {
-		if (!showChainLine || !chainRef.current) return;
+		if (!showChainLine || !chainRef.current || !firstMessage?.profile) return;
 
 		// Initial update
 		updateLineHeight();
@@ -349,7 +348,9 @@ const ChainGroup = memo(function ChainGroup({
 				resizeObserverRef.current = null;
 			}
 		};
-	}, [showChainLine, updateLineHeight]);
+	}, [showChainLine, updateLineHeight, firstMessage?.profile]);
+
+	if (!firstMessage?.profile) return null;
 
 	return (
 		<div ref={chainRef} className="space-y-0.5 relative">

@@ -1,6 +1,5 @@
 import { createClient } from "@/utils/supabase/server";
 import { generateEmbeddings } from "@/utils/embeddings";
-import type { Database } from "@/lib/database.types";
 
 export interface SearchResult {
 	id: string;
@@ -11,8 +10,11 @@ export interface SearchResult {
 	created_at: string;
 }
 
-type MatchResult =
-	Database["public"]["Functions"]["match_messages"]["Returns"][number];
+interface MatchResult {
+	id: string;
+	content: string;
+	similarity: number;
+}
 
 export async function searchMessages(query: string): Promise<SearchResult[]> {
 	console.log("\n[searchMessages] Starting search for query:", query);
@@ -33,10 +35,7 @@ export async function searchMessages(query: string): Promise<SearchResult[]> {
 		match_count: 5,
 	});
 
-	const { data: results, error } = await supabase.rpc<
-		Database["public"]["Functions"]["match_messages"]["Returns"][number],
-		Database["public"]["Functions"]["match_messages"]["Args"]
-	>("match_messages", {
+	const { data: results, error } = await supabase.rpc("match_messages", {
 		query_embedding: embedding,
 		match_threshold: 0.1,
 		match_count: 5,

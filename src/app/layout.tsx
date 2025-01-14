@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { MessageCacheProvider } from "@/components/messages/MessageCache";
+import { ChatDialog } from "@/components/ChatDialog";
 
 const geistSans = Geist({
 	variable: "--font-geist-sans",
@@ -32,6 +33,7 @@ export default function RootLayout({
 				<MessageCacheProvider>
 					{children}
 					<Toaster />
+					<ChatDialog />
 				</MessageCacheProvider>
 			</body>
 		</html>

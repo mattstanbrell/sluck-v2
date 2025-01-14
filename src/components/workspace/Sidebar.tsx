@@ -185,8 +185,9 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 				</div>
 				<nav className="space-y-1">
 					{joinedChannels.map((channel) => {
-						const channelUrl = `/workspace/${workspace?.slug}/channel/${channel.slug}`;
-						const isActive = pathname === channelUrl;
+						const channelUrl = `/workspace/${workspace?.slug}/channel/${channel.slug}?channelId=${channel.id}&channelName=${encodeURIComponent(channel.name)}${channel.description ? `&description=${encodeURIComponent(channel.description)}` : ""}&isMember=true`;
+						const basePath = `/workspace/${workspace?.slug}/channel/${channel.slug}`;
+						const isActive = pathname === basePath;
 
 						return (
 							<Link

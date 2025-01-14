@@ -36,8 +36,9 @@ export function UnjoinedChannels({
 			{isExpanded && (
 				<div className="mt-1 space-y-1">
 					{channels.map((channel) => {
-						const channelUrl = `/workspace/${workspaceSlug}/channel/${channel.slug}`;
-						const isActive = pathname === channelUrl;
+						const channelUrl = `/workspace/${workspaceSlug}/channel/${channel.slug}?channelId=${channel.id}&channelName=${encodeURIComponent(channel.name)}${channel.description ? `&description=${encodeURIComponent(channel.description)}` : ""}&isMember=false`;
+						const basePath = `/workspace/${workspaceSlug}/channel/${channel.slug}`;
+						const isActive = pathname === basePath;
 
 						return (
 							<Link

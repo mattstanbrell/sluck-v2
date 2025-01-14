@@ -7,13 +7,11 @@ import { useRouter } from "next/navigation";
 interface UnjoinedChannelViewProps {
 	channelId: string;
 	channelName: string;
-	workspaceId: string;
 }
 
 export function UnjoinedChannelView({
 	channelId,
 	channelName,
-	workspaceId,
 }: UnjoinedChannelViewProps) {
 	const router = useRouter();
 	const supabase = createClient();

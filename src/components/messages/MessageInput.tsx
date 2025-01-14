@@ -25,7 +25,6 @@ import {
 } from "@/components/ui/popover";
 import { createMessage } from "@/app/actions/message";
 import type { MessageChainContext } from "@/types/message";
-import type { Database } from "@/lib/database.types";
 
 // Add a helper function to generate a unique key for files
 const generateFileKey = (file: File, index: number) => {
@@ -37,10 +36,6 @@ interface MessageInputProps {
 	conversationId?: string;
 	parentId?: string;
 }
-
-type ChainMessage = Database["public"]["Tables"]["messages"]["Row"] & {
-	profiles: Database["public"]["Tables"]["profiles"]["Row"];
-};
 
 export function MessageInput({
 	channelId,
@@ -278,7 +273,7 @@ export function MessageInput({
 					);
 				} else {
 					console.log("[MessageInput] Got participants:", participants);
-					const recipient = participants?.[0]?.profiles;
+					const recipient = participants?.[0]?.profiles?.[0];
 					if (recipient) {
 						recipientName =
 							recipient.display_name || recipient.full_name || null;
@@ -346,8 +341,9 @@ export function MessageInput({
 						Math.floor(new Date(msg.created_at).getTime() / 60000) * 60000,
 					),
 					sender: {
-						id: msg.profiles?.id,
-						displayName: msg.profiles?.display_name || msg.profiles?.full_name,
+						id: msg.profiles?.[0]?.id,
+						displayName:
+							msg.profiles?.[0]?.display_name || msg.profiles?.[0]?.full_name,
 					},
 					channelId: msg.channel_id,
 					channelName, // Use same channel name for all messages in chain
