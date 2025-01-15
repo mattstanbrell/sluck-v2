@@ -2,7 +2,6 @@
 
 import { createClient } from "@/utils/supabase/server";
 import { revalidatePath } from "next/cache";
-import { logDB } from "@/utils/logging";
 
 export async function createWorkspace(name: string) {
 	const supabase = await createClient();
@@ -13,10 +12,13 @@ export async function createWorkspace(name: string) {
 		error: userError,
 	} = await supabase.auth.getUser();
 	if (userError || !user) {
+		console.error("Auth error:", userError);
 		throw new Error("Unauthorized");
 	}
+	console.log("Current user:", user.id);
 
 	// Start with workspace creation
+	console.log("Attempting to create workspace:", name);
 	const { data: workspace, error: workspaceError } = await supabase
 		.from("workspaces")
 		.insert({
@@ -26,17 +28,11 @@ export async function createWorkspace(name: string) {
 		.select()
 		.single();
 
-	logDB({
-		operation: "INSERT",
-		table: "workspaces",
-		description: "Creating new workspace",
-		result: workspace,
-		error: workspaceError,
-	});
-
 	if (workspaceError) {
+		console.error("Workspace creation error:", workspaceError);
 		throw new Error(workspaceError.message);
 	}
+	console.log("Workspace created:", workspace);
 
 	revalidatePath("/");
 	return workspace;
@@ -75,15 +71,8 @@ export async function generateWorkspaceInvite(workspaceId: string) {
 		)
 		.single();
 
-	logDB({
-		operation: "UPDATE",
-		table: "workspaces",
-		description: "Generating workspace invite code",
-		result: data,
-		error: error,
-	});
-
 	if (error) {
+		console.error("Failed to generate invite code:", error);
 		throw new Error("Failed to generate invite code");
 	}
 
@@ -107,17 +96,11 @@ export async function joinWorkspaceWithCode(inviteCode: string) {
 		_invite_code: inviteCode,
 	});
 
-	logDB({
-		operation: "INSERT",
-		table: "workspace_members",
-		description: "Joining workspace with invite code",
-		result: data,
-		error: error,
-	});
-
 	if (error) {
+		console.error("Join error:", error);
 		throw new Error(error.message);
 	}
 
-	return data;
+	// The function returns the workspace slug
+	return { slug: data };
 }

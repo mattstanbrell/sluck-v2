@@ -3,8 +3,6 @@ import { redirect } from "next/navigation";
 import { CreateWorkspaceDialog } from "@/components/workspace/CreateWorkspaceDialog";
 import { JoinWorkspaceForm } from "@/components/workspace/JoinWorkspaceForm";
 import type { WorkspaceMember } from "@/types/workspace";
-import { logDB } from "@/utils/logging";
-import type { PostgrestResponse } from "@supabase/supabase-js";
 
 type WorkspaceMemberWithSlug = WorkspaceMember & {
 	workspaces: {
@@ -24,21 +22,12 @@ export default async function Home() {
 	}
 
 	// Check if user is in any workspaces
-	const { data: workspaceMemberships, error: membershipError } = await supabase
+	const { data: workspaceMemberships } = (await supabase
 		.from("workspace_members")
 		.select("workspace_id, joined_at, workspaces(slug)")
 		.eq("user_id", user.id)
 		.order("joined_at", { ascending: true })
-		.limit(1)
-		.returns<WorkspaceMemberWithSlug[]>();
-
-	logDB({
-		operation: "SELECT",
-		table: "workspace_members",
-		description: `Checking workspace memberships for user ${user.id}`,
-		result: workspaceMemberships,
-		error: membershipError,
-	});
+		.limit(1)) as { data: WorkspaceMemberWithSlug[] | null };
 
 	// If user is in at least one workspace, redirect to their first workspace
 	if (

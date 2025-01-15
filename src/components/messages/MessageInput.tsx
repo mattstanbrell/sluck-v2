@@ -25,7 +25,6 @@ import {
 } from "@/components/ui/popover";
 import { createMessage } from "@/app/actions/message";
 import type { MessageChainContext } from "@/types/message";
-import { logDB } from "@/utils/logging";
 
 // Add a helper function to generate a unique key for files
 const generateFileKey = (file: File, index: number) => {
@@ -176,19 +175,10 @@ export function MessageInput({
 		let messageId: string | null = null;
 
 		try {
+			console.log("[MessageInput] Getting user profile...");
 			const {
 				data: { user },
-				error: authError,
 			} = await supabase.auth.getUser();
-
-			logDB({
-				operation: "SELECT",
-				table: "auth.users",
-				description: "Getting user for message creation",
-				result: user ? { id: user.id } : null,
-				error: authError,
-			});
-
 			if (!user) {
 				throw new Error("Not authenticated");
 			}
@@ -199,22 +189,23 @@ export function MessageInput({
 				.eq("id", user.id)
 				.single();
 
-			logDB({
-				operation: "SELECT",
-				table: "profiles",
-				description: "Getting user profile for message",
-				result: profile,
-				error: profileError,
-			});
-
-			if (!profile) {
+			if (profileError) {
+				console.error("[MessageInput] Profile query error:", profileError);
 				throw new Error("Failed to get user profile");
 			}
+
+			if (!profile) {
+				console.error("[MessageInput] No profile found");
+				throw new Error("Failed to get user profile");
+			}
+
+			console.log("[MessageInput] Got profile:", profile);
 
 			// Round current time to nearest minute for the current message
 			const now = new Date();
 			const nearestMinute = new Date(Math.round(now.getTime() / 60000) * 60000);
 
+			console.log("[MessageInput] Getting latest message...");
 			// Get messages in the current chain
 			const { data: latestMessage, error: latestMessageError } = await supabase
 				.from("messages")
@@ -229,37 +220,40 @@ export function MessageInput({
 				.order("created_at", { ascending: false })
 				.limit(1);
 
-			logDB({
-				operation: "SELECT",
-				table: "messages",
-				description: "Getting latest message for chain context",
-				result: latestMessage,
-				error: latestMessageError,
-			});
+			if (latestMessageError) {
+				console.error(
+					"[MessageInput] Latest message query error:",
+					latestMessageError,
+				);
+			} else {
+				console.log("[MessageInput] Latest message:", latestMessage);
+			}
 
 			// Get channel name if in a channel
 			let channelName = null;
 			if (channelId) {
+				console.log("[MessageInput] Getting channel name for:", channelId);
 				const { data: channel, error: channelError } = await supabase
 					.from("channels")
 					.select("name")
 					.eq("id", channelId)
 					.single();
 
-				logDB({
-					operation: "SELECT",
-					table: "channels",
-					description: `Getting channel name (${channelId})`,
-					result: channel,
-					error: channelError,
-				});
-
-				channelName = channel?.name || null;
+				if (channelError) {
+					console.error("[MessageInput] Channel query error:", channelError);
+				} else {
+					console.log("[MessageInput] Got channel:", channel);
+					channelName = channel?.name || null;
+				}
 			}
 
 			// Get recipient name if in a DM
 			let recipientName = null;
 			if (conversationId) {
+				console.log(
+					"[MessageInput] Getting recipient for conversation:",
+					conversationId,
+				);
 				const { data: participants, error: participantsError } = await supabase
 					.from("conversation_participants")
 					.select(`
@@ -272,21 +266,23 @@ export function MessageInput({
 					.eq("conversation_id", conversationId)
 					.neq("user_id", profile.id);
 
-				logDB({
-					operation: "SELECT",
-					table: "conversation_participants",
-					description: `Getting conversation participants (${conversationId})`,
-					result: participants,
-					error: participantsError,
-				});
-
-				const recipient = participants?.[0]?.profiles?.[0];
-				if (recipient) {
-					recipientName = recipient.display_name || recipient.full_name || null;
+				if (participantsError) {
+					console.error(
+						"[MessageInput] Participants query error:",
+						participantsError,
+					);
+				} else {
+					console.log("[MessageInput] Got participants:", participants);
+					const recipient = participants?.[0]?.profiles?.[0];
+					if (recipient) {
+						recipientName =
+							recipient.display_name || recipient.full_name || null;
+					}
 				}
 			}
 
-			// Get chain messages
+			console.log("[MessageInput] Getting chain messages...");
+			// If we found a latest message, get all consecutive messages from that user
 			const { data: chainMessages, error: chainMessagesError } = await supabase
 				.from("messages")
 				.select(`
@@ -312,13 +308,17 @@ export function MessageInput({
 				)
 				.order("created_at", { ascending: false });
 
-			logDB({
-				operation: "SELECT",
-				table: "messages",
-				description: "Getting chain messages for context",
-				result: chainMessages,
-				error: chainMessagesError,
-			});
+			if (chainMessagesError) {
+				console.error(
+					"[MessageInput] Chain messages query error:",
+					chainMessagesError,
+				);
+			} else {
+				console.log(
+					"[MessageInput] Got chain messages:",
+					chainMessages?.length || 0,
+				);
+			}
 
 			// Create message context
 			const messageContext: MessageChainContext = {
@@ -336,6 +336,7 @@ export function MessageInput({
 				},
 				chainMessages: (chainMessages || []).map((msg) => ({
 					content: msg.content,
+					// Round down to minute for chain messages
 					timestamp: new Date(
 						Math.floor(new Date(msg.created_at).getTime() / 60000) * 60000,
 					),
@@ -345,11 +346,18 @@ export function MessageInput({
 							msg.profiles?.[0]?.display_name || msg.profiles?.[0]?.full_name,
 					},
 					channelId: msg.channel_id,
-					channelName,
+					channelName, // Use same channel name for all messages in chain
 					conversationId: msg.conversation_id,
-					recipientName,
+					recipientName, // Use same recipient name for all messages in chain
 				})),
 			};
+
+			console.log("[MessageInput] Creating message with context:", {
+				content: content.trim(),
+				channelId,
+				conversationId,
+				messageContext,
+			});
 
 			// Create message using server action
 			const message = await createMessage({
@@ -360,27 +368,24 @@ export function MessageInput({
 				messageContext,
 			});
 			messageId = message.id;
+			console.log("[MessageInput] Message created:", message);
 
 			// Upload any pending files
 			if (pendingFiles.length > 0) {
 				try {
+					console.log("[MessageInput] Uploading files...");
 					await Promise.all(
 						pendingFiles.map((file) => uploadFile(file, message.id)),
 					);
+					console.log("[MessageInput] Files uploaded successfully");
 				} catch (uploadError) {
+					console.error("[MessageInput] File upload error:", uploadError);
 					// If any file upload fails, delete the message and throw the error
 					if (messageId) {
-						const { error: deleteError } = await supabase
-							.from("messages")
-							.delete()
-							.eq("id", messageId);
-
-						logDB({
-							operation: "DELETE",
-							table: "messages",
-							description: `Deleting message ${messageId} due to file upload error`,
-							error: deleteError,
-						});
+						console.log(
+							"[MessageInput] Deleting message due to file upload error",
+						);
+						await supabase.from("messages").delete().eq("id", messageId);
 					}
 					throw uploadError;
 				}
@@ -389,6 +394,7 @@ export function MessageInput({
 			setContent("");
 			setPendingFiles([]);
 		} catch (error) {
+			console.error("[MessageInput] Error sending message:", error);
 			setError(
 				error instanceof Error ? error.message : "Failed to send message",
 			);
@@ -501,7 +507,7 @@ export function MessageInput({
 											type="button"
 											variant="ghost"
 											size="sm"
-											onClick={() => insertMarkdown("[", "]()")}
+											onClick={() => insertMarkdown("[", "](url)")}
 											title="Link"
 											className="text-custom-text hover:bg-custom-ui-medium hover:text-custom-text"
 										>
@@ -509,6 +515,7 @@ export function MessageInput({
 										</Button>
 									</PopoverContent>
 								</Popover>
+
 								<Button
 									type="button"
 									variant="ghost"

@@ -11,8 +11,6 @@ import { UserAvatar } from "../ui/UserAvatar";
 import { Button } from "@/components/ui/button";
 import { ListEnd } from "lucide-react";
 import { ThreadRepliesIndicator } from "./ThreadRepliesIndicator";
-import { useProfileCache } from "@/components/providers/ProfileCacheProvider";
-import { logDB } from "@/utils/logging";
 
 function debounce<T extends (...args: unknown[]) => void>(
 	fn: T,
@@ -30,6 +28,32 @@ function debounce<T extends (...args: unknown[]) => void>(
 	};
 
 	return debouncedFn;
+}
+
+const supabase = createClient();
+
+async function fetchReplyProfiles(userIds: string[]) {
+	if (!userIds.length) return {};
+
+	const { data } = await supabase
+		.from("profiles")
+		.select(`
+			id,
+			full_name,
+			display_name,
+			avatar_url,
+			avatar_color,
+			avatar_cache
+		`)
+		.in("id", userIds);
+
+	const profileMap: Record<string, ProfileWithId> = {};
+	if (data) {
+		for (const profile of data) {
+			profileMap[profile.id] = profile;
+		}
+	}
+	return profileMap;
 }
 
 /**
@@ -87,11 +111,14 @@ export function MessageList({
 	highlightedMessageId?: string;
 }) {
 	const { getChannelMessages, updateChannelMessages } = useMessageCache();
-	const { getProfile, bulkCacheProfiles, getCachedProfile } = useProfileCache();
 	const [isInitialLoad, setIsInitialLoad] = useState(true);
+	const [isLoading, setIsLoading] = useState(false);
+	const [profilesMap, setProfilesMap] = useState<Record<string, ProfileWithId>>(
+		{},
+	);
 	const messagesEndRef = useRef<HTMLDivElement>(null);
+	const prevChannelIdRef = useRef<string | undefined>(undefined);
 	const lastLoggedStateRef = useRef<string>("");
-	const supabase = useMemo(() => createClient(), []);
 
 	// Get messages from cache
 	const messages = useMemo(() => {
@@ -99,15 +126,36 @@ export function MessageList({
 	}, [channelId, getChannelMessages, parentId]);
 	const hasMessages = messages.length > 0;
 
-	// Build a map of profiles for the thread replies indicator
-	const profilesMap = useMemo(() => {
+	// Update profiles map whenever messages change
+	useEffect(() => {
 		const map: Record<string, ProfileWithId> = {};
+		const replyUserIds = new Set<string>();
+
+		// First add message author profiles
 		for (const m of messages) {
 			if (m.profile?.id) {
 				map[m.profile.id] = m.profile;
 			}
+			// Collect unique reply user IDs
+			if (m.reply_user_ids) {
+				for (const id of m.reply_user_ids) {
+					replyUserIds.add(id);
+				}
+			}
 		}
-		return map;
+
+		// Set initial map with author profiles
+		setProfilesMap(map);
+
+		// Fetch reply profiles if we have any
+		if (replyUserIds.size > 0) {
+			fetchReplyProfiles(Array.from(replyUserIds)).then((replyProfiles) => {
+				setProfilesMap((current) => ({
+					...current,
+					...replyProfiles,
+				}));
+			});
+		}
 	}, [messages]);
 
 	// Group messages into chains
@@ -124,145 +172,152 @@ export function MessageList({
 	useEffect(() => {
 		if (!channelId) return;
 
-		const currentState = `${channelId}-${messages.length}`;
+		const currentState = `${channelId}-${messages.length}-${isLoading}`;
 		if (currentState !== lastLoggedStateRef.current) {
 			lastLoggedStateRef.current = currentState;
 
-			const status = hasMessages ? "ready" : "empty";
+			const status = isLoading ? "loading" : hasMessages ? "ready" : "empty";
 			console.log("[MessageList] Status:", {
 				channel: channelId,
 				messages: hasMessages ? messages.length : "none",
 				status,
 				cached: hasMessages,
+				initialLoadDone: INITIAL_LOAD_DONE.current,
 			});
 		}
-	}, [channelId, messages.length, hasMessages]);
+	}, [channelId, messages.length, isLoading, hasMessages]);
+
+	// Track when messages are actually ready to view
+	useEffect(() => {
+		if (messages.length > 0 && !isLoading && channelId) {
+			const isChannelSwitch = channelId !== prevChannelIdRef.current;
+			console.log("[MessageList] Ready to view:", {
+				channel: channelId,
+				messages: messages.length,
+				fromCache: hasMessages && !isChannelSwitch,
+			});
+		}
+	}, [messages.length, isLoading, channelId, hasMessages]);
 
 	// Initial load scroll
 	useEffect(() => {
-		if (isInitialLoad) {
-			if (messages.length > 0) {
-				console.log("[MessageList] First messages loaded, scrolling to bottom");
-				scrollToBottom();
-			} else {
-				console.log("[MessageList] No initial messages");
-			}
+		if (isInitialLoad && messages.length > 0) {
+			console.log("[MessageList] First messages loaded, scrolling to bottom");
+			scrollToBottom();
 			setIsInitialLoad(false);
 		}
 	}, [isInitialLoad, messages.length, scrollToBottom]);
 
-	// Update the profile loading effect to use bulk caching
+	// Fetch messages if needed
 	useEffect(() => {
-		if (!messages.length) return;
+		if (!channelId) return;
 
-		// Extract profiles from messages that already have them
-		const profilesFromMessages = messages
-			.filter(
-				(m): m is Message & { profile: NonNullable<Message["profile"]> } =>
-					m.profile?.id != null,
-			)
-			.map((m) => m.profile);
+		const isChannelSwitch = channelId !== prevChannelIdRef.current;
+		const needsInitialLoad = !INITIAL_LOAD_DONE.current;
 
-		// Bulk cache any profiles we already have
-		if (profilesFromMessages.length > 0) {
-			bulkCacheProfiles(profilesFromMessages);
+		// Only fetch if:
+		// 1. This is our very first channel load ever, or
+		// 2. We're switching channels AND don't have the messages cached
+		const shouldFetch = needsInitialLoad || (isChannelSwitch && !hasMessages);
+
+		if (!shouldFetch) {
+			if (hasMessages && isChannelSwitch) {
+				console.log(
+					"[MessageList] Using cached messages for channel switch:",
+					channelId,
+				);
+			}
+			return;
 		}
 
-		// Find which profiles we still need to fetch
-		const uniqueUserIds = new Set(messages.map((m) => m.user_id));
-		const missingProfileIds = Array.from(uniqueUserIds).filter(
-			(userId) => !getCachedProfile(userId),
-		);
+		prevChannelIdRef.current = channelId;
 
-		// Only fetch profiles we don't have
-		if (missingProfileIds.length > 0) {
-			Promise.all(missingProfileIds.map((id) => getProfile(id))).then(
-				(profiles) => {
-					const validProfiles = profiles.filter(
-						(p): p is NonNullable<typeof p> => p !== null,
-					);
-					if (validProfiles.length > 0) {
-						bulkCacheProfiles(validProfiles);
+		async function fetchMessages() {
+			console.log("[MessageList] Fetching messages:", {
+				channel: channelId,
+				reason: needsInitialLoad
+					? "first time load"
+					: "channel switch - not cached",
+			});
+
+			setIsLoading(true);
+			try {
+				const query = supabase
+					.from("messages")
+					.select(
+						`*,
+						profile:profiles (
+							id,
+							full_name,
+							display_name,
+							avatar_url,
+							avatar_color,
+							avatar_cache
+						),
+						files (
+							id,
+							file_type,
+							file_name,
+							file_size,
+							file_url
+						),
+						reply_count,
+						reply_user_ids`,
+					)
+					.order("created_at", { ascending: true });
+
+				if (channelId) {
+					query.eq("channel_id", channelId);
+				} else if (conversationId) {
+					query.eq("conversation_id", conversationId);
+				}
+
+				if (parentId) {
+					query.eq("parent_id", parentId);
+				} else if (isMainView) {
+					query.is("parent_id", null);
+				}
+
+				const { data, error } = await query;
+
+				if (error) {
+					console.error("[MessageList] Failed to load messages:", error);
+				} else if (data && channelId) {
+					console.log("[MessageList] Database returned:", {
+						channel: channelId,
+						messages: data.length,
+					});
+					updateChannelMessages(channelId, data as Message[], parentId);
+
+					if (needsInitialLoad) {
+						INITIAL_LOAD_DONE.current = true;
+						console.log(
+							"[MessageList] First load complete, starting background prefetch",
+						);
 					}
-				},
-			);
+				}
+			} finally {
+				setIsLoading(false);
+			}
 		}
-	}, [messages, bulkCacheProfiles, getCachedProfile, getProfile]);
 
-	// Subscribe to new messages
-	useEffect(() => {
-		if (!channelId && !conversationId) return;
-
-		const channel = supabase
-			.channel(`messages-${channelId || conversationId}`)
-			.on(
-				"postgres_changes",
-				{
-					event: "*",
-					schema: "public",
-					table: "messages",
-					filter: channelId
-						? `channel_id=eq.${channelId}`
-						: `conversation_id=eq.${conversationId}`,
-				},
-				async (payload) => {
-					// Refetch all messages to ensure consistency
-					const query = supabase
-						.from("messages")
-						.select(
-							`*,
-							profile:profiles (
-								id,
-								full_name,
-								display_name,
-								avatar_url,
-								avatar_color,
-								avatar_cache
-							),
-							files (
-								id,
-								file_type,
-								file_name,
-								file_size,
-								file_url
-							)`,
-						)
-						.order("created_at", { ascending: true });
-
-					if (channelId) {
-						query.eq("channel_id", channelId);
-					} else if (conversationId) {
-						query.eq("conversation_id", conversationId);
-					}
-
-					if (parentId) {
-						query.eq("parent_id", parentId);
-					} else if (isMainView) {
-						query.is("parent_id", null);
-					}
-
-					const { data, error } = await query;
-
-					if (error) {
-						console.error("[MessageList] Failed to update messages:", error);
-					} else if (data && channelId) {
-						updateChannelMessages(channelId, data as Message[], parentId);
-					}
-				},
-			)
-			.subscribe();
-
-		return () => {
-			channel.unsubscribe();
-		};
+		fetchMessages();
 	}, [
 		channelId,
-		conversationId,
+		hasMessages,
 		parentId,
 		isMainView,
 		updateChannelMessages,
-		supabase,
+		conversationId,
 	]);
+
+	if (isLoading && !hasMessages) {
+		return (
+			<div className="flex-1 flex items-center justify-center">
+				<div className="text-custom-text-secondary">Loading messages...</div>
+			</div>
+		);
+	}
 
 	return (
 		<div
@@ -270,15 +325,7 @@ export function MessageList({
 				isMainView ? "px-8 pt-7 pb-10" : "px-4 pt-3 pb-10"
 			}`}
 		>
-			{!isInitialLoad && messageGroups.length === 0 && (
-				<div className="flex flex-col items-center justify-center h-32">
-					<p className="text-custom-text-secondary text-lg">No messages yet</p>
-					<p className="text-custom-text-tertiary text-sm mt-1">
-						Be the first one to send a message!
-					</p>
-				</div>
-			)}
-			{messageGroups.map((chain: MessageGroup, i: number) => (
+			{messageGroups.map((chain, i) => (
 				<ChainGroup
 					key={`${chain.userId}-${i}`}
 					chain={chain}

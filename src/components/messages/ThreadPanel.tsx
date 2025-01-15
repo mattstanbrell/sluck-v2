@@ -54,7 +54,9 @@ export function ThreadPanel({
               file_name,
               file_size,
               file_url
-            )
+            ),
+            reply_count,
+            reply_user_ids
           `,
 				)
 				.eq("id", selectedMessageId)

@@ -2,7 +2,6 @@ import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createClient } from "@/utils/supabase/server";
 import { nanoid } from "nanoid";
-import { logDB } from "@/utils/logging";
 
 export async function POST(request: Request) {
 	try {
@@ -12,17 +11,7 @@ export async function POST(request: Request) {
 		// Authenticate user
 		const {
 			data: { user },
-			error: authError,
 		} = await supabase.auth.getUser();
-
-		logDB({
-			operation: "SELECT",
-			table: "auth.users",
-			description: "Verifying user authentication for file upload",
-			error: authError,
-			result: user ? { id: user.id } : null,
-		});
-
 		if (!user) {
 			return Response.json({ error: "Unauthorized" }, { status: 401 });
 		}
@@ -64,13 +53,9 @@ export async function POST(request: Request) {
 
 		return Response.json({ url, key });
 	} catch (error) {
+		console.error("Error generating presigned URL:", error);
 		return Response.json(
-			{
-				error:
-					error instanceof Error
-						? error.message
-						: "Failed to generate upload URL",
-			},
+			{ error: "Failed to generate upload URL" },
 			{ status: 500 },
 		);
 	}

@@ -1,7 +1,6 @@
 import { createClient } from "@/utils/supabase/server";
 import { Sidebar } from "@/components/workspace/Sidebar";
 import { notFound } from "next/navigation";
-import { logDB } from "@/utils/logging";
 
 export default async function WorkspaceLayout({
 	children,
@@ -14,19 +13,11 @@ export default async function WorkspaceLayout({
 	const supabase = await createClient();
 
 	// Get workspace from slug
-	const { data: workspace, error: workspaceError } = await supabase
+	const { data: workspace } = await supabase
 		.from("workspaces")
 		.select("id")
 		.eq("slug", workspaceSlug)
 		.single();
-
-	logDB({
-		operation: "SELECT",
-		table: "workspaces",
-		description: `Fetching workspace ID for layout (${workspaceSlug})`,
-		result: workspace,
-		error: workspaceError,
-	});
 
 	if (!workspace) {
 		notFound();

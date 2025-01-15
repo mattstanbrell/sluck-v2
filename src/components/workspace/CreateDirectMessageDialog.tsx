@@ -15,14 +15,14 @@ import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { RefreshCw } from "lucide-react";
-import type { Profile } from "@/types/profile";
-import { useProfileCache } from "@/components/providers/ProfileCacheProvider";
-import { logDB } from "@/utils/logging";
+import type { ProfileWithId } from "@/types/profile";
+
+type UserProfile = ProfileWithId;
 
 interface CreateDirectMessageDialogProps {
 	workspaceId: string;
 	workspaceSlug: string;
-	trigger: React.ReactNode;
+	trigger?: React.ReactNode;
 }
 
 export function CreateDirectMessageDialog({
@@ -30,58 +30,70 @@ export function CreateDirectMessageDialog({
 	workspaceSlug,
 	trigger,
 }: CreateDirectMessageDialogProps) {
+	const [availableUsers, setAvailableUsers] = useState<UserProfile[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
-	const [availableUsers, setAvailableUsers] = useState<Profile[]>([]);
-	const [selectedUser, setSelectedUser] = useState<Profile | null>(null);
 	const [open, setOpen] = useState(false);
 	const { toast } = useToast();
 	const router = useRouter();
 	const supabase = createClient();
-	const { getProfiles } = useProfileCache();
 
 	const loadAvailableUsers = useCallback(async () => {
+		setIsLoading(true);
+		console.log("[loadAvailableUsers] Start");
 		try {
-			setIsLoading(true);
-
 			// 1) Get current user
 			const {
 				data: { user },
-				error: authError,
+				error: userError,
 			} = await supabase.auth.getUser();
-
-			logDB({
-				operation: "SELECT",
-				table: "auth.users",
-				description: "Getting current user for DM dialog",
-				result: user ? { id: user.id } : null,
-				error: authError,
-			});
+			if (userError) {
+				console.error("[loadAvailableUsers] Error fetching user:", userError);
+			}
+			console.log("[loadAvailableUsers] Current user =>", user?.id);
 
 			if (!user) {
+				console.warn(
+					"[loadAvailableUsers] No authenticated user found; exiting.",
+				);
 				return;
 			}
 
-			// 2) Get all workspace members
-			const { data: members, error: membersError } = await supabase
+			// 2) Get all workspace members for this workspace
+			console.log(
+				"[loadAvailableUsers] Querying workspace_members => workspace_id:",
+				workspaceId,
+			);
+			const { data: workspaceMembers, error: membersError } = await supabase
 				.from("workspace_members")
 				.select("user_id")
 				.eq("workspace_id", workspaceId);
 
-			logDB({
-				operation: "SELECT",
-				table: "workspace_members",
-				description: `Getting members for workspace ${workspaceId}`,
-				result: members ? { count: members.length } : null,
-				error: membersError,
-			});
-
 			if (membersError) {
+				console.error(
+					"[loadAvailableUsers] Error fetching workspace_members:",
+					membersError,
+				);
+			}
+			console.log(
+				"[loadAvailableUsers] workspace_members data =>",
+				workspaceMembers?.map((m) => m.user_id),
+			);
+
+			if (!workspaceMembers) {
+				console.warn(
+					"[loadAvailableUsers] workspaceMembers is null or undefined.",
+				);
 				return;
 			}
 
-			const memberIds = members.map((m) => m.user_id);
+			// Exclude current user from the list
+			const memberIds = workspaceMembers.map((m) => m.user_id);
+			console.log("[loadAvailableUsers] Found memberIds =>", memberIds);
 
 			// 3) Fetch existing DM conversations for user
+			console.log(
+				"[loadAvailableUsers] Fetching existing direct conversations...",
+			);
 			const { data: existingDMs, error: dmError } = await supabase
 				.from("conversations")
 				.select(`
@@ -92,17 +104,10 @@ export function CreateDirectMessageDialog({
 				.eq("type", "direct")
 				.eq("conversation_participants.user_id", user.id);
 
-			logDB({
-				operation: "SELECT",
-				table: "conversations",
-				description: `Getting existing DMs for user ${user.id} in workspace ${workspaceId}`,
-				result: existingDMs ? { count: existingDMs.length } : null,
-				error: dmError,
-			});
-
 			if (dmError) {
-				return;
+				console.error("[loadAvailableUsers] Error fetching DMs:", dmError);
 			}
+			console.log("[loadAvailableUsers] existingDMs =>", existingDMs);
 
 			// 4) Build list of user IDs already in a DM with current user
 			const existingDMUserIds = new Set<string>();
@@ -115,22 +120,48 @@ export function CreateDirectMessageDialog({
 					}
 				}
 			}
-
-			// 5) Get profiles for members who are not the current user & not already in a DM
-			const availableUserIds = memberIds.filter(
-				(id) => id !== user.id && !existingDMUserIds.has(id),
+			console.log(
+				"[loadAvailableUsers] existingDMUserIds =>",
+				Array.from(existingDMUserIds),
 			);
 
-			if (availableUserIds.length > 0) {
-				const profilesMap = await getProfiles(availableUserIds);
-				const profiles = Array.from(profilesMap.values());
-				setAvailableUsers(
-					profiles.sort((a, b) => a.full_name.localeCompare(b.full_name)),
-				);
-			} else {
-				setAvailableUsers([]);
+			// 5) Fetch profiles of members who are not the current user & not already in a DM
+			console.log(
+				"[loadAvailableUsers] Fetching profiles, excluding current user & existing DM participants.",
+			);
+			const dmUserIdsArray = Array.from(existingDMUserIds);
+
+			// Construct a base query
+			let query = supabase
+				.from("profiles")
+				.select("id, full_name, display_name, avatar_url, avatar_cache")
+				.in("id", memberIds)
+				.neq("id", user.id);
+
+			// Only apply "not.in" if there are items to exclude
+			if (dmUserIdsArray.length > 0) {
+				query = query.filter("id", "not.in", dmUserIdsArray);
 			}
+
+			query = query.order("full_name");
+
+			const { data: profiles, error: profilesError } = await query;
+
+			if (profilesError) {
+				console.error(
+					"[loadAvailableUsers] Error fetching profiles:",
+					profilesError,
+				);
+			}
+			console.log(
+				"[loadAvailableUsers] Final filtered profiles =>",
+				profiles?.map((p) => p.id),
+				profiles,
+			);
+
+			setAvailableUsers(profiles || []);
 		} catch (error) {
+			console.error("[loadAvailableUsers] Unexpected error:", error);
 			toast({
 				title: "Error",
 				description: "Failed to load available users",
@@ -138,8 +169,9 @@ export function CreateDirectMessageDialog({
 			});
 		} finally {
 			setIsLoading(false);
+			console.log("[loadAvailableUsers] Complete");
 		}
-	}, [workspaceId, supabase, getProfiles, toast]);
+	}, [supabase, workspaceId, toast]);
 
 	useEffect(() => {
 		if (open) {
@@ -149,6 +181,10 @@ export function CreateDirectMessageDialog({
 
 	const startConversation = async (otherUserId: string) => {
 		setIsLoading(true);
+		console.log(
+			"[startConversation] Attempting with otherUserId =>",
+			otherUserId,
+		);
 		try {
 			// Call the SECURITY DEFINER function
 			const { data: conversationId, error } = await supabase.rpc(
@@ -159,21 +195,25 @@ export function CreateDirectMessageDialog({
 				},
 			);
 
-			logDB({
-				operation: "INSERT",
-				table: "conversations",
-				description: `Creating DM between users in workspace ${workspaceId}`,
-				result: conversationId ? { id: conversationId } : null,
-				error,
-			});
-
 			if (error) {
+				console.error(
+					"[startConversation] Error creating conversation:",
+					error,
+				);
 				throw error;
 			}
 
+			console.log("[startConversation] Conversation created successfully");
 			setOpen(false);
+
+			// Navigate to the new conversation
+			console.log(
+				"[startConversation] Navigating to =>",
+				`/workspace/${workspaceSlug}/conversation/${conversationId}`,
+			);
 			router.push(`/workspace/${workspaceSlug}/conversation/${conversationId}`);
 		} catch (error) {
+			console.error("[startConversation] Unexpected error:", error);
 			toast({
 				title: "Error",
 				description: "Failed to start conversation",

@@ -11,10 +11,9 @@ interface ChannelContentProps {
 		name: string;
 		description: string | null;
 	};
-	workspaceId: string;
 }
 
-export function ChannelContent({ channel, workspaceId }: ChannelContentProps) {
+export function ChannelContent({ channel }: ChannelContentProps) {
 	const [showFiles, setShowFiles] = useState(false);
 
 	return (
@@ -28,7 +27,7 @@ export function ChannelContent({ channel, workspaceId }: ChannelContentProps) {
 					<Button
 						variant="ghost"
 						size="icon"
-						onClick={() => setShowFiles(!showFiles)}
+						onClick={() => setShowFiles(true)}
 						className="text-custom-text-secondary hover:text-custom-text hover:bg-custom-ui-faint"
 					>
 						<Files className="h-4 w-4" />
@@ -43,7 +42,6 @@ export function ChannelContent({ channel, workspaceId }: ChannelContentProps) {
 					channelId={channel.id}
 					showFiles={showFiles}
 					onCloseFiles={() => setShowFiles(false)}
-					workspaceId={workspaceId}
 				/>
 			</div>
 		</div>

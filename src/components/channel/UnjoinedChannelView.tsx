@@ -3,101 +3,34 @@
 import { createClient } from "@/utils/supabase/client";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
-import { logDB } from "@/utils/logging";
-import { useToast } from "@/hooks/use-toast";
 
 interface UnjoinedChannelViewProps {
 	channelId: string;
 	channelName: string;
-	onJoin?: () => void;
 }
 
 export function UnjoinedChannelView({
 	channelId,
 	channelName,
-	onJoin,
 }: UnjoinedChannelViewProps) {
 	const router = useRouter();
 	const supabase = createClient();
-	const { toast } = useToast();
 
 	const handleJoinChannel = async () => {
-		// Get current user
-		const {
-			data: { user },
-			error: authError,
-		} = await supabase.auth.getUser();
-
-		logDB({
-			operation: "SELECT",
-			table: "auth.users",
-			description: "Getting current user for channel join",
-			result: user ? { id: user.id } : null,
-			error: authError,
-		});
-
-		if (!user) {
-			toast({
-				title: "Error",
-				description: "You must be logged in to join a channel",
-				variant: "destructive",
-			});
-			return;
-		}
-
-		// Check if already a member
-		const { data: existingMembership } = await supabase
-			.from("channel_members")
-			.select()
-			.eq("channel_id", channelId)
-			.eq("user_id", user.id)
-			.single();
-
-		if (existingMembership) {
-			// If already a member, call onJoin
-			onJoin?.();
-			return;
-		}
-
-		// Join channel
 		const { error } = await supabase.from("channel_members").insert([
 			{
 				channel_id: channelId,
-				user_id: user.id,
+				user_id: (await supabase.auth.getUser()).data.user?.id,
 				role: "member",
 			},
 		]);
 
-		logDB({
-			operation: "INSERT",
-			table: "channel_members",
-			description: `User ${user.id} joining channel ${channelId}`,
-			error: error,
-		});
-
 		if (error) {
-			if (error.code === "23505") {
-				// If we hit a race condition and the membership was created
-				// between our check and insert, call onJoin
-				onJoin?.();
-				return;
-			}
-
-			toast({
-				title: "Error",
-				description: "Failed to join channel. Please try again.",
-				variant: "destructive",
-			});
+			console.error("Error joining channel:", error);
 			return;
 		}
 
-		toast({
-			title: "Success",
-			description: `You've joined #${channelName}`,
-		});
-
-		// Call onJoin callback
-		onJoin?.();
+		router.refresh();
 	};
 
 	return (

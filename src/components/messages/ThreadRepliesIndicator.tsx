@@ -19,6 +19,15 @@ export function ThreadRepliesIndicator({
 	onClick,
 	highlightedMessageId,
 }: ThreadRepliesIndicatorProps) {
+	console.log("[ThreadRepliesIndicator]", {
+		messageId,
+		replyUserIds,
+		profilesCount: Object.keys(profiles).length,
+		displayedProfilesCount: replyUserIds
+			.map((id) => profiles[id])
+			.filter(Boolean).length,
+	});
+
 	const displayedProfiles = replyUserIds
 		.map((id) => profiles[id])
 		.filter(Boolean)
