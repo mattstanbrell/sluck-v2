@@ -7,11 +7,13 @@ import type { ChannelBasic } from "@/types/channel";
 interface UnjoinedChannelsProps {
 	channels: ChannelBasic[];
 	workspaceSlug: string;
+	workspaceId: string;
 }
 
 export function UnjoinedChannels({
 	channels,
 	workspaceSlug,
+	workspaceId,
 }: UnjoinedChannelsProps) {
 	const [isExpanded, setIsExpanded] = useState(false);
 	const pathname = usePathname();
@@ -36,7 +38,7 @@ export function UnjoinedChannels({
 			{isExpanded && (
 				<div className="mt-1 space-y-1">
 					{channels.map((channel) => {
-						const channelUrl = `/workspace/${workspaceSlug}/channel/${channel.slug}?channelId=${channel.id}&channelName=${encodeURIComponent(channel.name)}${channel.description ? `&description=${encodeURIComponent(channel.description)}` : ""}&isMember=false`;
+						const channelUrl = `/workspace/${workspaceSlug}/channel/${channel.slug}?channelId=${channel.id}&channelName=${encodeURIComponent(channel.name)}${channel.description ? `&description=${encodeURIComponent(channel.description)}` : ""}&isMember=false&workspaceId=${workspaceId}`;
 						const basePath = `/workspace/${workspaceSlug}/channel/${channel.slug}`;
 						const isActive = pathname === basePath;
 

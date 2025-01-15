@@ -137,12 +137,12 @@ export function ChannelPrefetcher({
 				const workspaceChannels = allChannels.filter(
 					(c) => c.workspace_id === workspaceId,
 				);
-				const joinedChannels = workspaceChannels.filter((c) =>
-					joinedIds.has(c.id),
-				);
-				const unjoinedChannels = workspaceChannels.filter(
-					(c) => !joinedIds.has(c.id),
-				);
+				const joinedChannels = workspaceChannels
+					.filter((c) => joinedIds.has(c.id))
+					.sort((a, b) => a.name.localeCompare(b.name));
+				const unjoinedChannels = workspaceChannels
+					.filter((c) => !joinedIds.has(c.id))
+					.sort((a, b) => a.name.localeCompare(b.name));
 
 				console.log("[Background] Found channels:", {
 					joined: joinedChannels.length,
@@ -152,19 +152,12 @@ export function ChannelPrefetcher({
 				// Update sidebar with channel lists
 				onChannelsLoaded(joinedChannels, unjoinedChannels);
 
-				// Sort channels so active channel is first
-				const sortedChannels = joinedChannels.sort((a, b) => {
-					if (a.id === activeChannelId) return -1;
-					if (b.id === activeChannelId) return 1;
-					return 0;
-				});
-
 				console.log(
 					"[Background] Preparing messages for all joined channels...",
 				);
 
 				// Load messages for each channel sequentially
-				for (const channel of sortedChannels) {
+				for (const channel of joinedChannels) {
 					await prefetchChannelMessages(channel.id);
 				}
 

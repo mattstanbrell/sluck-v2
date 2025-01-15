@@ -110,11 +110,7 @@ export default function JoinWorkspacePage() {
 	};
 
 	if (isLoading) {
-		return (
-			<div className="flex min-h-screen items-center justify-center bg-custom-background">
-				<p className="text-custom-text">Loading...</p>
-			</div>
-		);
+		return null;
 	}
 
 	if (error) {

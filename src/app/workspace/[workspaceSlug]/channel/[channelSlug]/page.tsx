@@ -20,6 +20,7 @@ export default function ChannelPage() {
 	const [channel, setChannel] = useState<ChannelData | null>(null);
 	const [isMember, setIsMember] = useState<boolean | null>(null);
 	const [isLoading, setIsLoading] = useState(true);
+	const [workspaceId, setWorkspaceId] = useState<string | null>(null);
 
 	useEffect(() => {
 		async function loadChannel() {
@@ -28,14 +29,16 @@ export default function ChannelPage() {
 			const channelName = searchParams.get("channelName");
 			const description = searchParams.get("description");
 			const isMemberParam = searchParams.get("isMember");
+			const workspaceIdParam = searchParams.get("workspaceId");
 
 			// If we have search params, use them
-			if (channelId && channelName) {
+			if (channelId && channelName && workspaceIdParam) {
 				setChannel({
 					id: channelId,
 					name: channelName,
 					description: description,
 				});
+				setWorkspaceId(workspaceIdParam);
 				setIsMember(isMemberParam === "true");
 				setIsLoading(false);
 				return;
@@ -62,6 +65,8 @@ export default function ChannelPage() {
 			if (!workspace) {
 				notFound();
 			}
+
+			setWorkspaceId(workspace.id);
 
 			// Get channel data
 			const { data: channelData, error: channelError } = await supabase
@@ -108,18 +113,22 @@ export default function ChannelPage() {
 	}, [params, searchParams]);
 
 	if (isLoading) {
-		return <div>Loading...</div>;
+		return null;
 	}
 
-	if (!channel) {
+	if (!channel || !workspaceId) {
 		return notFound();
 	}
 
 	if (!isMember) {
 		return (
-			<UnjoinedChannelView channelId={channel.id} channelName={channel.name} />
+			<UnjoinedChannelView
+				channelId={channel.id}
+				channelName={channel.name}
+				onJoin={() => setIsMember(true)}
+			/>
 		);
 	}
 
-	return <ChannelContent channel={channel} />;
+	return <ChannelContent channel={channel} workspaceId={workspaceId} />;
 }

@@ -4,18 +4,22 @@ import { createClient } from "@/utils/supabase/client";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
 import { logDB } from "@/utils/logging";
+import { useToast } from "@/hooks/use-toast";
 
 interface UnjoinedChannelViewProps {
 	channelId: string;
 	channelName: string;
+	onJoin?: () => void;
 }
 
 export function UnjoinedChannelView({
 	channelId,
 	channelName,
+	onJoin,
 }: UnjoinedChannelViewProps) {
 	const router = useRouter();
 	const supabase = createClient();
+	const { toast } = useToast();
 
 	const handleJoinChannel = async () => {
 		// Get current user
@@ -32,7 +36,28 @@ export function UnjoinedChannelView({
 			error: authError,
 		});
 
-		if (!user) return;
+		if (!user) {
+			toast({
+				title: "Error",
+				description: "You must be logged in to join a channel",
+				variant: "destructive",
+			});
+			return;
+		}
+
+		// Check if already a member
+		const { data: existingMembership } = await supabase
+			.from("channel_members")
+			.select()
+			.eq("channel_id", channelId)
+			.eq("user_id", user.id)
+			.single();
+
+		if (existingMembership) {
+			// If already a member, call onJoin
+			onJoin?.();
+			return;
+		}
 
 		// Join channel
 		const { error } = await supabase.from("channel_members").insert([
@@ -51,10 +76,28 @@ export function UnjoinedChannelView({
 		});
 
 		if (error) {
+			if (error.code === "23505") {
+				// If we hit a race condition and the membership was created
+				// between our check and insert, call onJoin
+				onJoin?.();
+				return;
+			}
+
+			toast({
+				title: "Error",
+				description: "Failed to join channel. Please try again.",
+				variant: "destructive",
+			});
 			return;
 		}
 
-		router.refresh();
+		toast({
+			title: "Success",
+			description: `You've joined #${channelName}`,
+		});
+
+		// Call onJoin callback
+		onJoin?.();
 	};
 
 	return (

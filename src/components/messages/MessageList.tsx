@@ -89,7 +89,6 @@ export function MessageList({
 	const { getChannelMessages, updateChannelMessages } = useMessageCache();
 	const { getProfile, bulkCacheProfiles, getCachedProfile } = useProfileCache();
 	const [isInitialLoad, setIsInitialLoad] = useState(true);
-	const [isLoading, setIsLoading] = useState(false);
 	const messagesEndRef = useRef<HTMLDivElement>(null);
 	const lastLoggedStateRef = useRef<string>("");
 	const supabase = useMemo(() => createClient(), []);
@@ -125,11 +124,11 @@ export function MessageList({
 	useEffect(() => {
 		if (!channelId) return;
 
-		const currentState = `${channelId}-${messages.length}-${isLoading}`;
+		const currentState = `${channelId}-${messages.length}`;
 		if (currentState !== lastLoggedStateRef.current) {
 			lastLoggedStateRef.current = currentState;
 
-			const status = isLoading ? "loading" : hasMessages ? "ready" : "empty";
+			const status = hasMessages ? "ready" : "empty";
 			console.log("[MessageList] Status:", {
 				channel: channelId,
 				messages: hasMessages ? messages.length : "none",
@@ -137,13 +136,17 @@ export function MessageList({
 				cached: hasMessages,
 			});
 		}
-	}, [channelId, messages.length, isLoading, hasMessages]);
+	}, [channelId, messages.length, hasMessages]);
 
 	// Initial load scroll
 	useEffect(() => {
-		if (isInitialLoad && messages.length > 0) {
-			console.log("[MessageList] First messages loaded, scrolling to bottom");
-			scrollToBottom();
+		if (isInitialLoad) {
+			if (messages.length > 0) {
+				console.log("[MessageList] First messages loaded, scrolling to bottom");
+				scrollToBottom();
+			} else {
+				console.log("[MessageList] No initial messages");
+			}
 			setIsInitialLoad(false);
 		}
 	}, [isInitialLoad, messages.length, scrollToBottom]);
@@ -185,93 +188,6 @@ export function MessageList({
 			);
 		}
 	}, [messages, bulkCacheProfiles, getCachedProfile, getProfile]);
-
-	// Fetch messages if needed
-	useEffect(() => {
-		if (!channelId) return;
-
-		// Only fetch if we don't have messages yet
-		if (hasMessages) {
-			console.log("[MessageList] Using cached messages for:", channelId);
-			return;
-		}
-
-		async function fetchMessages() {
-			console.log("[MessageList] Fetching messages:", {
-				channel: channelId,
-				reason: "not in cache",
-			});
-
-			setIsLoading(true);
-			try {
-				const query = supabase
-					.from("messages")
-					.select(
-						`*,
-						profile:profiles (
-							id,
-							full_name,
-							display_name,
-							avatar_url,
-							avatar_color,
-							avatar_cache
-						),
-						files (
-							id,
-							file_type,
-							file_name,
-							file_size,
-							file_url
-						)`,
-					)
-					.order("created_at", { ascending: true });
-
-				if (channelId) {
-					query.eq("channel_id", channelId);
-				} else if (conversationId) {
-					query.eq("conversation_id", conversationId);
-				}
-
-				if (parentId) {
-					query.eq("parent_id", parentId);
-				} else if (isMainView) {
-					query.is("parent_id", null);
-				}
-
-				const { data, error } = await query;
-
-				logDB({
-					operation: "SELECT",
-					table: "messages",
-					description: `Loading messages for ${channelId ? `channel ${channelId}` : `conversation ${conversationId}`}${parentId ? ` in thread ${parentId}` : ""}`,
-					result: data ? { count: data.length } : null,
-					error,
-				});
-
-				if (error) {
-					console.error("[MessageList] Failed to load messages:", error);
-				} else if (data && channelId) {
-					console.log("[MessageList] Database returned:", {
-						channel: channelId,
-						messages: data.length,
-					});
-					updateChannelMessages(channelId, data as Message[], parentId);
-				}
-			} finally {
-				setIsLoading(false);
-			}
-		}
-
-		fetchMessages();
-	}, [
-		channelId,
-		hasMessages,
-		parentId,
-		isMainView,
-		updateChannelMessages,
-		conversationId,
-		supabase,
-	]);
 
 	// Subscribe to new messages
 	useEffect(() => {
@@ -348,20 +264,20 @@ export function MessageList({
 		supabase,
 	]);
 
-	if (isLoading && !hasMessages) {
-		return (
-			<div className="flex-1 flex items-center justify-center">
-				<div className="text-custom-text-secondary">Loading messages...</div>
-			</div>
-		);
-	}
-
 	return (
 		<div
 			className={`flex flex-col gap-4 overflow-x-hidden ${
 				isMainView ? "px-8 pt-7 pb-10" : "px-4 pt-3 pb-10"
 			}`}
 		>
+			{!isInitialLoad && messageGroups.length === 0 && (
+				<div className="flex flex-col items-center justify-center h-32">
+					<p className="text-custom-text-secondary text-lg">No messages yet</p>
+					<p className="text-custom-text-tertiary text-sm mt-1">
+						Be the first one to send a message!
+					</p>
+				</div>
+			)}
 			{messageGroups.map((chain: MessageGroup, i: number) => (
 				<ChainGroup
 					key={`${chain.userId}-${i}`}

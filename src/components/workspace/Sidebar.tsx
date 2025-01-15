@@ -235,7 +235,7 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 			{/* Workspace Header */}
 			<div className="px-4 py-4 flex items-center justify-between">
 				<h1 className="font-semibold text-lg text-custom-text">
-					{workspace?.name || "Loading..."}
+					{workspace?.name || ""}
 				</h1>
 				<WorkspaceSettingsDialog
 					workspaceId={workspaceId}
@@ -259,7 +259,7 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 				</div>
 				<nav className="space-y-1">
 					{joinedChannels.map((channel) => {
-						const channelUrl = `/workspace/${workspace?.slug}/channel/${channel.slug}?channelId=${channel.id}&channelName=${encodeURIComponent(channel.name)}${channel.description ? `&description=${encodeURIComponent(channel.description)}` : ""}&isMember=true`;
+						const channelUrl = `/workspace/${workspace?.slug}/channel/${channel.slug}?channelId=${channel.id}&channelName=${encodeURIComponent(channel.name)}${channel.description ? `&description=${encodeURIComponent(channel.description)}` : ""}&isMember=true&workspaceId=${workspaceId}`;
 						const basePath = `/workspace/${workspace?.slug}/channel/${channel.slug}`;
 						const isActive = pathname === basePath;
 
@@ -295,6 +295,7 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 					<UnjoinedChannels
 						channels={unjoinedChannels}
 						workspaceSlug={workspace?.slug || ""}
+						workspaceId={workspaceId}
 					/>
 				</nav>
 
