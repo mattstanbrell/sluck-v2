@@ -120,6 +120,14 @@ export async function streamChat(messages: Message[]) {
 			messagesWithContext.map((m) => m.role),
 		);
 
+		// Add detailed logging of the full context
+		console.log("[streamChat] Full messages context:");
+		messagesWithContext.forEach((msg, i) => {
+			console.log(`\n[Message ${i + 1}]`);
+			console.log("Role:", msg.role);
+			console.log("Content:", msg.content);
+		});
+
 		console.log("[streamChat] Calling OpenAI...");
 		const response = await openai.chat.completions.create({
 			model: "gpt-4o-mini",
