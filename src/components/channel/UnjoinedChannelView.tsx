@@ -2,7 +2,10 @@
 
 import { createClient } from "@/utils/supabase/client";
 import { Button } from "@/components/ui/button";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useToast } from "@/hooks/use-toast";
+import { useState } from "react";
+import { ChannelContent } from "./ChannelContent";
 
 interface UnjoinedChannelViewProps {
 	channelId: string;
@@ -14,24 +17,108 @@ export function UnjoinedChannelView({
 	channelName,
 }: UnjoinedChannelViewProps) {
 	const router = useRouter();
+	const searchParams = useSearchParams();
 	const supabase = createClient();
+	const { toast } = useToast();
+	const [hasJoined, setHasJoined] = useState(false);
 
 	const handleJoinChannel = async () => {
-		const { error } = await supabase.from("channel_members").insert([
-			{
-				channel_id: channelId,
-				user_id: (await supabase.auth.getUser()).data.user?.id,
-				role: "member",
-			},
-		]);
+		try {
+			// Get current user
+			const {
+				data: { user },
+				error: userError,
+			} = await supabase.auth.getUser();
+			if (userError || !user) {
+				toast({
+					title: "Error",
+					description: "You must be logged in to join channels",
+					variant: "destructive",
+				});
+				return;
+			}
 
-		if (error) {
-			console.error("Error joining channel:", error);
-			return;
+			// Join the channel
+			const { error } = await supabase.from("channel_members").insert([
+				{
+					channel_id: channelId,
+					user_id: user.id,
+					role: "member",
+				},
+			]);
+
+			if (error) {
+				console.error("Error joining channel:", error);
+				toast({
+					title: "Error",
+					description: "Failed to join channel. Please try again.",
+					variant: "destructive",
+				});
+				return;
+			}
+
+			// Get the current workspace ID from the URL
+			const workspaceId = window.location.pathname.split("/")[2];
+
+			// Fetch updated channel lists
+			const { data: allChannels } = await supabase
+				.from("channels")
+				.select("id, name, slug, description")
+				.eq("workspace_id", workspaceId)
+				.order("name");
+
+			if (allChannels) {
+				// Get joined channels
+				const { data: joinedChannelIds } = await supabase
+					.from("channel_members")
+					.select("channel_id")
+					.eq("user_id", user.id);
+
+				const joinedIds = new Set(joinedChannelIds?.map((m) => m.channel_id));
+				const joinedChannels = allChannels.filter((c) => joinedIds.has(c.id));
+				const unjoinedChannels = allChannels.filter(
+					(c) => !joinedIds.has(c.id),
+				);
+
+				// Dispatch a custom event to update the sidebar
+				window.dispatchEvent(
+					new CustomEvent("updateChannels", {
+						detail: { joinedChannels, unjoinedChannels },
+					}),
+				);
+			}
+
+			toast({
+				title: "Success",
+				description: `You've joined #${channelName}`,
+			});
+
+			// Update local state to show channel content
+			setHasJoined(true);
+
+			// Update URL to reflect membership
+			const currentUrl = new URL(window.location.href);
+			const newParams = new URLSearchParams(searchParams);
+			newParams.set("isMember", "true");
+			const pathname = currentUrl.pathname;
+			router.replace(`${pathname}?${newParams.toString()}`);
+		} catch (error) {
+			console.error("Unexpected error:", error);
+			toast({
+				title: "Error",
+				description: "An unexpected error occurred. Please try again.",
+				variant: "destructive",
+			});
 		}
-
-		router.refresh();
 	};
+
+	if (hasJoined) {
+		return (
+			<ChannelContent
+				channel={{ id: channelId, name: channelName, description: null }}
+			/>
+		);
+	}
 
 	return (
 		<div className="h-[calc(100vh-4rem)] flex flex-col items-center justify-center relative bg-custom-background">

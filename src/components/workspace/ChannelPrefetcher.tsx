@@ -29,6 +29,17 @@ export function ChannelPrefetcher({
 	useEffect(() => {
 		const supabase = createClient();
 
+		// Add event listener for immediate channel updates
+		const handleChannelUpdate = (event: CustomEvent) => {
+			const { joinedChannels, unjoinedChannels } = event.detail;
+			onChannelsLoaded(joinedChannels, unjoinedChannels);
+		};
+
+		window.addEventListener(
+			"updateChannels",
+			handleChannelUpdate as EventListener,
+		);
+
 		async function prefetchChannelMessages(channelId: string) {
 			console.log("[Background] Preparing messages for channel:", channelId);
 
@@ -70,15 +81,15 @@ export function ChannelPrefetcher({
 			}
 		}
 
-		async function prefetchChannels() {
-			const now = Date.now();
-			// If less than DEBOUNCE_TIME has passed since last fetch, skip
-			if (now - lastFetchRef.current < DEBOUNCE_TIME) {
-				return;
-			}
-			lastFetchRef.current = now;
-
+		// Core fetch logic without debounce check
+		async function fetchChannels() {
 			console.log("[Background] Getting list of available channels...");
+
+			// Get current user
+			const {
+				data: { user },
+			} = await supabase.auth.getUser();
+			if (!user) return;
 
 			// Get all channels
 			const { data: allChannels, error: channelsError } = await supabase
@@ -99,7 +110,7 @@ export function ChannelPrefetcher({
 			const { data: joinedChannelIds, error: membershipError } = await supabase
 				.from("channel_members")
 				.select("channel_id")
-				.eq("user_id", (await supabase.auth.getUser()).data.user?.id);
+				.eq("user_id", user.id);
 
 			if (membershipError) {
 				console.error(
@@ -136,8 +147,18 @@ export function ChannelPrefetcher({
 			}
 		}
 
+		// Debounced version for regular updates
+		async function debouncedFetchChannels() {
+			const now = Date.now();
+			if (now - lastFetchRef.current < DEBOUNCE_TIME) {
+				return;
+			}
+			lastFetchRef.current = now;
+			await fetchChannels();
+		}
+
 		// Initial fetch
-		prefetchChannels();
+		fetchChannels();
 
 		// Set up subscription for real-time updates
 		const channelSubscription = supabase
@@ -158,16 +179,40 @@ export function ChannelPrefetcher({
 					// Set a new timeout to debounce the fetch
 					timeoutRef.current = setTimeout(() => {
 						console.log("[Background] Channel list changed, updating...");
-						prefetchChannels();
+						debouncedFetchChannels();
 					}, DEBOUNCE_TIME);
+				},
+			)
+			.on(
+				"postgres_changes",
+				{
+					event: "*",
+					schema: "public",
+					table: "channel_members",
+				},
+				() => {
+					// For membership changes, update immediately without debounce
+					console.log(
+						"[Background] Channel membership changed, updating immediately...",
+					);
+					fetchChannels();
 				},
 			)
 			.subscribe();
 
 		return () => {
+			// Clean up event listener
+			window.removeEventListener(
+				"updateChannels",
+				handleChannelUpdate as EventListener,
+			);
+
+			// Clean up timeout
 			if (timeoutRef.current) {
 				clearTimeout(timeoutRef.current);
 			}
+
+			// Unsubscribe from realtime updates
 			channelSubscription.unsubscribe();
 		};
 	}, [workspaceId, onChannelsLoaded, updateChannelMessages]);
