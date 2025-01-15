@@ -14,11 +14,27 @@ export interface ConversationParticipant {
 // Type for API responses that include all participants
 export interface ConversationWithParticipants {
 	id: string;
-	conversation_participants: ConversationParticipant[];
+	conversation_participants: {
+		user_id: string;
+		profiles: {
+			full_name: string;
+			display_name: string | null;
+			avatar_url: string | null;
+			avatar_cache: string | null;
+		};
+	}[];
 }
 
 // Type for UI display with single participant (for DMs)
 export interface ConversationWithParticipant {
 	id: string;
-	participant: ConversationParticipant;
+	participant: {
+		user_id: string;
+		profiles: {
+			full_name: string;
+			display_name: string | null;
+			avatar_url: string | null;
+			avatar_cache: string | null;
+		};
+	};
 }

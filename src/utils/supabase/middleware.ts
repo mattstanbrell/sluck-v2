@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { logDB } from "@/utils/logging";
 
 export async function updateSession(request: NextRequest) {
 	let supabaseResponse = NextResponse.next({
@@ -34,10 +35,26 @@ export async function updateSession(request: NextRequest) {
 
 	const {
 		data: { user },
+		error: authError,
 	} = await supabase.auth.getUser();
+
+	await logDB({
+		operation: "SELECT",
+		table: "auth.users",
+		description: `Middleware auth check for ${request.nextUrl.pathname}`,
+		result: user ? { id: user.id } : null,
+		error: authError,
+	});
 
 	if (!user && !request.nextUrl.pathname.startsWith("/auth")) {
 		const redirectUrl = new URL("/auth", request.url);
+		await logDB({
+			operation: "DELETE",
+			table: "auth.sessions",
+			description: `Redirecting unauthenticated user from ${request.nextUrl.pathname} to /auth`,
+			result: { from: request.nextUrl.pathname, to: "/auth" },
+			error: null,
+		});
 		return NextResponse.redirect(redirectUrl);
 	}
 

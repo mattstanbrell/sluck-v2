@@ -1,5 +1,6 @@
 import { createClient } from "@/utils/supabase/server";
 import { redirect } from "next/navigation";
+import { logDB } from "@/utils/logging";
 
 interface WorkspacePageProps {
 	params: Promise<{ workspaceSlug: string }>;
@@ -30,8 +31,15 @@ export default async function WorkspacePage({ params }: WorkspacePageProps) {
 		.eq("user_id", user.id)
 		.maybeSingle();
 
+	logDB({
+		operation: "SELECT",
+		table: "workspace_members",
+		description: `Checking workspace membership for user ${user.id} in workspace ${workspaceSlug}`,
+		result: memberData,
+		error: memberError,
+	});
+
 	if (memberError) {
-		console.error("Membership check error:", memberError);
 		redirect("/");
 	}
 

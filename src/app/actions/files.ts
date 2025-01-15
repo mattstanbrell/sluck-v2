@@ -2,6 +2,7 @@
 
 import { createClient } from "@/utils/supabase/server";
 import type { DatabaseFile } from "@/types/message";
+import { logDB } from "@/utils/logging";
 
 export async function attachFileToMessage(
 	messageId: string,
@@ -33,6 +34,14 @@ export async function attachFileToMessage(
 		})
 		.select()
 		.single();
+
+	logDB({
+		operation: "INSERT",
+		table: "files",
+		description: `Attaching file ${fileName} to message ${messageId}`,
+		result: inserted,
+		error: insertError,
+	});
 
 	if (insertError) {
 		throw new Error(insertError.message);

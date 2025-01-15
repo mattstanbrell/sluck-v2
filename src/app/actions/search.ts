@@ -1,5 +1,6 @@
 import { createClient } from "@/utils/supabase/server";
 import { generateEmbeddings } from "@/utils/embeddings";
+import { logDB } from "@/utils/logging";
 
 export interface SearchResult {
 	id: string;
@@ -41,6 +42,14 @@ export async function searchMessages(query: string): Promise<SearchResult[]> {
 		match_count: 5,
 	});
 
+	logDB({
+		operation: "SELECT",
+		table: "messages",
+		description: "Searching messages using vector similarity",
+		result: results,
+		error: error,
+	});
+
 	if (error) {
 		console.error("[searchMessages] Error searching messages:", error);
 		return [];
@@ -70,6 +79,14 @@ export async function searchMessages(query: string): Promise<SearchResult[]> {
 				`)
 				.eq("id", result.id)
 				.single();
+
+			logDB({
+				operation: "SELECT",
+				table: "messages",
+				description: `Fetching context for message ${result.id}`,
+				result: message,
+				error: messageError,
+			});
 
 			if (messageError || !message) {
 				console.error(
@@ -102,6 +119,14 @@ export async function searchMessages(query: string): Promise<SearchResult[]> {
 				.lte("created_at", message.created_at)
 				.order("created_at", { ascending: true });
 
+			logDB({
+				operation: "SELECT",
+				table: "messages",
+				description: `Fetching chain messages for message ${result.id}`,
+				result: chainMessages,
+				error: chainError,
+			});
+
 			if (chainError) {
 				console.error(
 					"[searchMessages] Error fetching chain messages:",
@@ -110,26 +135,15 @@ export async function searchMessages(query: string): Promise<SearchResult[]> {
 			}
 
 			// Format the chain messages into a single context string
-			const chainContent = [
-				// Add channel/conversation context
-				message.channel_id
-					? `Channel: ${message.channels?.name}`
-					: "Direct Message",
-				// Add sender info
-				`Sender: ${message.profiles?.display_name || message.profiles?.full_name || "Unknown"}`,
-				// Add all messages in chronological order
-				...(chainMessages?.flatMap((msg) => [
-					`Message: ${msg.content}`,
-					`Time: ${new Date(msg.created_at).toLocaleDateString("en-GB", {
-						weekday: "long",
-						day: "numeric",
-						month: "long",
-						year: "numeric",
-						hour: "2-digit",
-						minute: "2-digit",
-					})}`,
-				]) || [`Message: ${message.content}`]),
-			].join("\n");
+			const chainContent =
+				chainMessages
+					?.map((msg) => {
+						const profile = Array.isArray(msg.profiles)
+							? msg.profiles[0]
+							: msg.profiles;
+						return `${profile?.display_name || profile?.full_name || "Unknown"}: ${msg.content}`;
+					})
+					.join("\n") || message.content;
 
 			const searchResult = {
 				id: result.id,

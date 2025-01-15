@@ -28,6 +28,7 @@ import { createClient } from "@/utils/supabase/server";
 import { generateEmbeddings } from "@/utils/embeddings";
 import type { MessageChainContext } from "@/types/message";
 import type { Database } from "@/lib/database.types";
+import { logDB } from "@/utils/logging";
 
 type DatabaseMessage = Database["public"]["Tables"]["messages"]["Row"];
 type DatabaseProfile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -100,7 +101,6 @@ export async function createMessage({
 	}
 
 	// Get messages in the current chain
-	console.log("[createMessage] Getting chain messages...");
 	const { data: chainMessages, error: chainMessagesError } = await supabase
 		.from("messages")
 		.select(
@@ -128,17 +128,13 @@ export async function createMessage({
 		.order("created_at", { ascending: false })
 		.returns<MessageWithProfile[]>();
 
-	if (chainMessagesError) {
-		console.error(
-			"[createMessage] Chain messages query error:",
-			chainMessagesError,
-		);
-	} else {
-		console.log(
-			"[createMessage] Got chain messages:",
-			chainMessages?.length || 0,
-		);
-	}
+	logDB({
+		operation: "SELECT",
+		table: "messages",
+		description: "Fetching chain messages for context",
+		result: chainMessages,
+		error: chainMessagesError,
+	});
 
 	// Start with an empty array for our filtered chain
 	const filteredChainMessages: MessageWithProfile[] = [];
@@ -200,20 +196,18 @@ export async function createMessage({
 		const messageIds = filteredChainMessages
 			.map((msg) => msg.id)
 			.filter(Boolean);
-		console.log(
-			"[createMessage] Clearing embeddings for chain messages:",
-			messageIds,
-		);
 
-		// Clear embeddings for all messages in the chain
 		const { error: updateError } = await supabase
 			.from("messages")
 			.update({ embedding: null })
 			.in("id", messageIds);
 
-		if (updateError) {
-			console.error("Failed to clear embeddings:", updateError);
-		}
+		logDB({
+			operation: "UPDATE",
+			table: "messages",
+			description: `Clearing embeddings for ${messageIds.length} chain messages`,
+			error: updateError,
+		});
 	}
 
 	// Insert the message with the embedding
@@ -230,18 +224,33 @@ export async function createMessage({
 		.select()
 		.single();
 
+	logDB({
+		operation: "INSERT",
+		table: "messages",
+		description: "Creating new message",
+		result: message,
+		error: messageError,
+	});
+
 	if (messageError) {
 		throw messageError;
 	}
 
 	// Update conversation's last_message_at if it's a DM
 	if (conversationId) {
-		await supabase
+		const { error: conversationError } = await supabase
 			.from("conversations")
 			.update({
 				last_message_at: new Date().toISOString(),
 			})
 			.eq("id", conversationId);
+
+		logDB({
+			operation: "UPDATE",
+			table: "conversations",
+			description: "Updating conversation last_message_at",
+			error: conversationError,
+		});
 	}
 
 	return message;

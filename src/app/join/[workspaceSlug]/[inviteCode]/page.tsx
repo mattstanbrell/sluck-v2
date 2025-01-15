@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { joinWorkspaceWithCode } from "@/app/actions/workspace";
 import type { WorkspaceBasic } from "@/types/workspace";
+import { logDB } from "@/utils/logging";
 
 export default function JoinWorkspacePage() {
 	const params = useParams();
@@ -40,6 +41,14 @@ export default function JoinWorkspacePage() {
 					.eq("slug", workspaceSlug)
 					.single();
 
+				logDB({
+					operation: "SELECT",
+					table: "workspaces",
+					description: `Fetching workspace info for invite validation (${workspaceSlug})`,
+					result: workspace,
+					error: workspaceError,
+				});
+
 				if (workspaceError || !workspace) {
 					setError("Workspace not found");
 					setIsLoading(false);
@@ -47,12 +56,20 @@ export default function JoinWorkspacePage() {
 				}
 
 				// Check if user is already a member
-				const { data: membership } = await supabase
+				const { data: membership, error: membershipError } = await supabase
 					.from("workspace_members")
 					.select("user_id")
 					.eq("workspace_id", workspace.id)
 					.eq("user_id", user.id)
 					.single();
+
+				logDB({
+					operation: "SELECT",
+					table: "workspace_members",
+					description: `Checking existing membership for user ${user.id} in workspace ${workspace.id}`,
+					result: membership,
+					error: membershipError,
+				});
 
 				if (membership) {
 					router.push(`/workspace/${workspaceSlug}`);

@@ -11,6 +11,8 @@ import { UserAvatar } from "../ui/UserAvatar";
 import { Button } from "@/components/ui/button";
 import { ListEnd } from "lucide-react";
 import { ThreadRepliesIndicator } from "./ThreadRepliesIndicator";
+import { useProfileCache } from "@/components/providers/ProfileCacheProvider";
+import { logDB } from "@/utils/logging";
 
 function debounce<T extends (...args: unknown[]) => void>(
 	fn: T,
@@ -29,8 +31,6 @@ function debounce<T extends (...args: unknown[]) => void>(
 
 	return debouncedFn;
 }
-
-const supabase = createClient();
 
 /**
  * Group consecutive messages from the same user
@@ -87,11 +87,12 @@ export function MessageList({
 	highlightedMessageId?: string;
 }) {
 	const { getChannelMessages, updateChannelMessages } = useMessageCache();
+	const { getProfile, bulkCacheProfiles, getCachedProfile } = useProfileCache();
 	const [isInitialLoad, setIsInitialLoad] = useState(true);
 	const [isLoading, setIsLoading] = useState(false);
 	const messagesEndRef = useRef<HTMLDivElement>(null);
-	const prevChannelIdRef = useRef<string | undefined>(undefined);
 	const lastLoggedStateRef = useRef<string>("");
+	const supabase = useMemo(() => createClient(), []);
 
 	// Get messages from cache
 	const messages = useMemo(() => {
@@ -134,22 +135,9 @@ export function MessageList({
 				messages: hasMessages ? messages.length : "none",
 				status,
 				cached: hasMessages,
-				initialLoadDone: INITIAL_LOAD_DONE.current,
 			});
 		}
 	}, [channelId, messages.length, isLoading, hasMessages]);
-
-	// Track when messages are actually ready to view
-	useEffect(() => {
-		if (messages.length > 0 && !isLoading && channelId) {
-			const isChannelSwitch = channelId !== prevChannelIdRef.current;
-			console.log("[MessageList] Ready to view:", {
-				channel: channelId,
-				messages: messages.length,
-				fromCache: hasMessages && !isChannelSwitch,
-			});
-		}
-	}, [messages.length, isLoading, channelId, hasMessages]);
 
 	// Initial load scroll
 	useEffect(() => {
@@ -160,36 +148,58 @@ export function MessageList({
 		}
 	}, [isInitialLoad, messages.length, scrollToBottom]);
 
+	// Update the profile loading effect to use bulk caching
+	useEffect(() => {
+		if (!messages.length) return;
+
+		// Extract profiles from messages that already have them
+		const profilesFromMessages = messages
+			.filter(
+				(m): m is Message & { profile: NonNullable<Message["profile"]> } =>
+					m.profile?.id != null,
+			)
+			.map((m) => m.profile);
+
+		// Bulk cache any profiles we already have
+		if (profilesFromMessages.length > 0) {
+			bulkCacheProfiles(profilesFromMessages);
+		}
+
+		// Find which profiles we still need to fetch
+		const uniqueUserIds = new Set(messages.map((m) => m.user_id));
+		const missingProfileIds = Array.from(uniqueUserIds).filter(
+			(userId) => !getCachedProfile(userId),
+		);
+
+		// Only fetch profiles we don't have
+		if (missingProfileIds.length > 0) {
+			Promise.all(missingProfileIds.map((id) => getProfile(id))).then(
+				(profiles) => {
+					const validProfiles = profiles.filter(
+						(p): p is NonNullable<typeof p> => p !== null,
+					);
+					if (validProfiles.length > 0) {
+						bulkCacheProfiles(validProfiles);
+					}
+				},
+			);
+		}
+	}, [messages, bulkCacheProfiles, getCachedProfile, getProfile]);
+
 	// Fetch messages if needed
 	useEffect(() => {
 		if (!channelId) return;
 
-		const isChannelSwitch = channelId !== prevChannelIdRef.current;
-		const needsInitialLoad = !INITIAL_LOAD_DONE.current;
-
-		// Only fetch if:
-		// 1. This is our very first channel load ever, or
-		// 2. We're switching channels AND don't have the messages cached
-		const shouldFetch = needsInitialLoad || (isChannelSwitch && !hasMessages);
-
-		if (!shouldFetch) {
-			if (hasMessages && isChannelSwitch) {
-				console.log(
-					"[MessageList] Using cached messages for channel switch:",
-					channelId,
-				);
-			}
+		// Only fetch if we don't have messages yet
+		if (hasMessages) {
+			console.log("[MessageList] Using cached messages for:", channelId);
 			return;
 		}
-
-		prevChannelIdRef.current = channelId;
 
 		async function fetchMessages() {
 			console.log("[MessageList] Fetching messages:", {
 				channel: channelId,
-				reason: needsInitialLoad
-					? "first time load"
-					: "channel switch - not cached",
+				reason: "not in cache",
 			});
 
 			setIsLoading(true);
@@ -230,6 +240,14 @@ export function MessageList({
 
 				const { data, error } = await query;
 
+				logDB({
+					operation: "SELECT",
+					table: "messages",
+					description: `Loading messages for ${channelId ? `channel ${channelId}` : `conversation ${conversationId}`}${parentId ? ` in thread ${parentId}` : ""}`,
+					result: data ? { count: data.length } : null,
+					error,
+				});
+
 				if (error) {
 					console.error("[MessageList] Failed to load messages:", error);
 				} else if (data && channelId) {
@@ -238,13 +256,6 @@ export function MessageList({
 						messages: data.length,
 					});
 					updateChannelMessages(channelId, data as Message[], parentId);
-
-					if (needsInitialLoad) {
-						INITIAL_LOAD_DONE.current = true;
-						console.log(
-							"[MessageList] First load complete, starting background prefetch",
-						);
-					}
 				}
 			} finally {
 				setIsLoading(false);
@@ -259,6 +270,82 @@ export function MessageList({
 		isMainView,
 		updateChannelMessages,
 		conversationId,
+		supabase,
+	]);
+
+	// Subscribe to new messages
+	useEffect(() => {
+		if (!channelId && !conversationId) return;
+
+		const channel = supabase
+			.channel(`messages-${channelId || conversationId}`)
+			.on(
+				"postgres_changes",
+				{
+					event: "*",
+					schema: "public",
+					table: "messages",
+					filter: channelId
+						? `channel_id=eq.${channelId}`
+						: `conversation_id=eq.${conversationId}`,
+				},
+				async (payload) => {
+					// Refetch all messages to ensure consistency
+					const query = supabase
+						.from("messages")
+						.select(
+							`*,
+							profile:profiles (
+								id,
+								full_name,
+								display_name,
+								avatar_url,
+								avatar_color,
+								avatar_cache
+							),
+							files (
+								id,
+								file_type,
+								file_name,
+								file_size,
+								file_url
+							)`,
+						)
+						.order("created_at", { ascending: true });
+
+					if (channelId) {
+						query.eq("channel_id", channelId);
+					} else if (conversationId) {
+						query.eq("conversation_id", conversationId);
+					}
+
+					if (parentId) {
+						query.eq("parent_id", parentId);
+					} else if (isMainView) {
+						query.is("parent_id", null);
+					}
+
+					const { data, error } = await query;
+
+					if (error) {
+						console.error("[MessageList] Failed to update messages:", error);
+					} else if (data && channelId) {
+						updateChannelMessages(channelId, data as Message[], parentId);
+					}
+				},
+			)
+			.subscribe();
+
+		return () => {
+			channel.unsubscribe();
+		};
+	}, [
+		channelId,
+		conversationId,
+		parentId,
+		isMainView,
+		updateChannelMessages,
+		supabase,
 	]);
 
 	if (isLoading && !hasMessages) {
@@ -275,7 +362,7 @@ export function MessageList({
 				isMainView ? "px-8 pt-7 pb-10" : "px-4 pt-3 pb-10"
 			}`}
 		>
-			{messageGroups.map((chain, i) => (
+			{messageGroups.map((chain: MessageGroup, i: number) => (
 				<ChainGroup
 					key={`${chain.userId}-${i}`}
 					chain={chain}

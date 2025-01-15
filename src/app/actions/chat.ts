@@ -3,6 +3,7 @@
 import OpenAI from "openai";
 import { searchMessages } from "./search";
 import { createClient } from "@/utils/supabase/server";
+import { logDB } from "@/utils/logging";
 
 const openai = new OpenAI({
 	apiKey: process.env.OPENAI_API_KEY,
@@ -27,11 +28,19 @@ export async function streamChat(messages: Message[]) {
 			throw new Error("Unauthorized");
 		}
 
-		const { data: profile } = await supabase
+		const { data: profile, error: profileError } = await supabase
 			.from("profiles")
 			.select("full_name, display_name")
 			.eq("id", user.id)
 			.single();
+
+		logDB({
+			operation: "SELECT",
+			table: "profiles",
+			description: "Fetching user profile for chat",
+			result: profile,
+			error: profileError,
+		});
 
 		if (!profile) {
 			throw new Error("User profile not found");

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createClient } from "@/utils/supabase/server";
+import { logDB } from "@/utils/logging";
 
 export async function POST(request: Request) {
 	try {
@@ -18,11 +19,19 @@ export async function POST(request: Request) {
 		}
 
 		// Query "files" table. If RLS denies it, no rows are returned.
-		const { data: fileRow } = await supabase
+		const { data: fileRow, error: fileError } = await supabase
 			.from("files")
 			.select("*")
 			.eq("file_url", fileKey)
 			.single();
+
+		logDB({
+			operation: "SELECT",
+			table: "files",
+			description: `Verifying access to file ${fileKey}`,
+			result: fileRow,
+			error: fileError,
+		});
 
 		if (!fileRow) {
 			return NextResponse.json(
@@ -53,7 +62,6 @@ export async function POST(request: Request) {
 
 		return NextResponse.json({ downloadURL });
 	} catch (error) {
-		console.error("Error generating presigned GET URL:", error);
 		return NextResponse.json(
 			{ error: error instanceof Error ? error.message : "Unknown error" },
 			{ status: 500 },

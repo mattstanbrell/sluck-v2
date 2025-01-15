@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { createClient } from "@/utils/supabase/client";
+import { logDB } from "@/utils/logging";
 
 interface UploadOptions {
 	maxSizeMB?: number;
@@ -86,12 +87,24 @@ export const useFileUpload = (options: UploadOptions = {}) => {
 			}
 
 			// Create file record in database
-			const { error: dbError } = await supabase.from("files").insert({
-				message_id: messageId,
-				file_name: file.name,
-				file_type: file.type,
-				file_size: file.size,
-				file_url: key,
+			const { data, error: dbError } = await supabase
+				.from("files")
+				.insert({
+					message_id: messageId,
+					file_name: file.name,
+					file_type: file.type,
+					file_size: file.size,
+					file_url: key,
+				})
+				.select()
+				.single();
+
+			logDB({
+				operation: "INSERT",
+				table: "files",
+				description: `Creating file record for ${file.name} in message ${messageId}`,
+				result: data,
+				error: dbError,
 			});
 
 			if (dbError) throw dbError;
@@ -101,16 +114,13 @@ export const useFileUpload = (options: UploadOptions = {}) => {
 				...prev,
 				[uploadId]: { progress: 100, state: "done" },
 			}));
-
-			return key;
 		} catch (error) {
-			console.error("Upload error:", error);
 			setUploadProgress((prev) => ({
 				...prev,
 				[uploadId]: {
 					progress: 0,
 					state: "error",
-					error: error instanceof Error ? error.message : "Upload failed",
+					error: error instanceof Error ? error.message : "Unknown error",
 				},
 			}));
 			throw error;

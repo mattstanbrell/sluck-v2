@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { Vibrant } from "node-vibrant/node";
+import { logDB } from "@/utils/logging";
 
 export async function GET(request: Request) {
 	const requestUrl = new URL(request.url);
@@ -55,13 +56,20 @@ export async function GET(request: Request) {
 			const base64Image = buffer.toString("base64");
 
 			// Update profile with avatar data - if this fails, we'll still continue with auth
-			await supabase
+			const { error: updateError } = await supabase
 				.from("profiles")
 				.update({
 					avatar_color: avatarColor,
 					avatar_cache: base64Image,
 				})
 				.eq("id", id);
+
+			logDB({
+				operation: "UPDATE",
+				table: "profiles",
+				description: "Updating user profile with avatar data",
+				error: updateError,
+			});
 		} catch (err: unknown) {
 			// Log error but continue with auth flow
 			console.error("Failed to process avatar - continuing with auth", err);

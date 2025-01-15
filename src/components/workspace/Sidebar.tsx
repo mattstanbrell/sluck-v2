@@ -2,8 +2,8 @@
 
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/utils/supabase/client";
-import { useEffect, useState, useCallback } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useEffect, useState, useCallback, useMemo } from "react";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { CreateChannelDialog } from "./CreateChannelDialog";
 import { WorkspaceSettingsDialog } from "./WorkspaceSettingsDialog";
@@ -18,6 +18,11 @@ import type {
 import type { ChannelBasic } from "@/types/channel";
 import type { WorkspaceBasic } from "@/types/workspace";
 import { UnjoinedChannels } from "./UnjoinedChannels";
+import { useProfileCache } from "@/components/providers/ProfileCacheProvider";
+import { logDB } from "@/utils/logging";
+
+// Initialize Supabase client outside component
+const supabase = createClient();
 
 type ConversationResponse = ConversationWithParticipants;
 type Conversation = ConversationWithParticipant;
@@ -29,9 +34,15 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 	const [unjoinedChannels, setUnjoinedChannels] = useState<ChannelBasic[]>([]);
 	const [conversations, setConversations] = useState<Conversation[]>([]);
 	const [profile, setProfile] = useState<UserProfile | null>(null);
-	const supabase = createClient();
+	const [userId, setUserId] = useState<string | null>(null);
+	const [isLoading, setIsLoading] = useState(true);
 	const router = useRouter();
 	const pathname = usePathname();
+	const searchParams = useSearchParams();
+	const { getProfile } = useProfileCache();
+
+	// Get active channel ID from URL
+	const activeChannelId = searchParams.get("channelId");
 
 	const handleChannelsLoaded = useCallback(
 		(joined: ChannelBasic[], unjoined: ChannelBasic[]) => {
@@ -41,23 +52,34 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 		[],
 	);
 
-	useEffect(() => {
-		async function loadInitialData() {
-			// Get current user
+	const loadInitialData = useCallback(async () => {
+		try {
+			setIsLoading(true);
+
 			const {
 				data: { user },
 			} = await supabase.auth.getUser();
 			if (!user) return;
 
+			setUserId(user.id);
+
 			// Load workspace
-			const { data: workspace } = await supabase
+			const { data: workspace, error: workspaceError } = await supabase
 				.from("workspaces")
 				.select("id, name, slug, description")
 				.eq("id", workspaceId)
 				.single();
 
+			await logDB({
+				operation: "SELECT",
+				table: "workspaces",
+				description: `Loading workspace ${workspaceId} for sidebar`,
+				result: workspace ? { id: workspace.id, name: workspace.name } : null,
+				error: workspaceError,
+			});
+
 			// Load conversations
-			const { data: conversations } = await supabase
+			const { data: conversations, error: conversationsError } = await supabase
 				.from("conversations")
 				.select(`
 					id,
@@ -74,6 +96,14 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 				.eq("workspace_id", workspaceId)
 				.eq("type", "direct");
 
+			await logDB({
+				operation: "SELECT",
+				table: "conversations",
+				description: `Loading direct message conversations for workspace ${workspaceId}`,
+				result: conversations ? { count: conversations.length } : null,
+				error: conversationsError,
+			});
+
 			// Transform conversations to get other participant
 			const transformedConversations =
 				(conversations as ConversationResponse[] | null)
@@ -84,24 +114,46 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 						if (!otherParticipant) return null;
 						return {
 							id: conv.id,
-							participant: otherParticipant,
+							participant: {
+								user_id: otherParticipant.user_id,
+								profiles: otherParticipant.profiles,
+							},
 						};
 					})
 					.filter((conv): conv is Conversation => conv !== null) || [];
 
-			// Load user profile
-			const { data: profile } = await supabase
-				.from("profiles")
-				.select("full_name, display_name, avatar_url, avatar_cache")
-				.eq("id", user.id)
-				.single();
-
 			setWorkspace(workspace);
-			setConversations(transformedConversations || []);
-			setProfile(profile);
+			setConversations(transformedConversations);
+		} catch (error) {
+			console.error("Error loading initial data:", error);
+		} finally {
+			setIsLoading(false);
+		}
+	}, [workspaceId]);
 
-			// Subscribe to conversation changes
-			const conversationSubscription = supabase
+	// Load user profile when userId changes
+	useEffect(() => {
+		const loadProfile = async () => {
+			if (!userId) return;
+			const userProfile = await getProfile(userId);
+			if (userProfile) {
+				const { full_name, display_name, avatar_url, avatar_cache } =
+					userProfile;
+				setProfile({ full_name, display_name, avatar_url, avatar_cache });
+			}
+		};
+		loadProfile();
+	}, [userId, getProfile]);
+
+	// Set up conversation subscription
+	useEffect(() => {
+		const setupSubscription = async () => {
+			const {
+				data: { user },
+			} = await supabase.auth.getUser();
+			if (!user) return;
+
+			const subscription = supabase
 				.channel("conversation-changes")
 				.on(
 					"postgres_changes",
@@ -112,9 +164,10 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 						filter: `workspace_id=eq.${workspaceId}`,
 					},
 					async () => {
-						const { data: updatedConversations } = await supabase
-							.from("conversations")
-							.select(`
+						const { data: updatedConversations, error: updateError } =
+							await supabase
+								.from("conversations")
+								.select(`
 								id,
 								conversation_participants!inner (
 									user_id,
@@ -126,35 +179,56 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 									)
 								)
 							`)
-							.eq("workspace_id", workspaceId)
-							.eq("type", "direct");
+								.eq("workspace_id", workspaceId)
+								.eq("type", "direct");
 
-						const transformedConversations =
-							(updatedConversations as ConversationResponse[] | null)
-								?.map((conv) => {
+						await logDB({
+							operation: "SELECT",
+							table: "conversations",
+							description: `Reloading conversations after change in workspace ${workspaceId}`,
+							result: updatedConversations
+								? { count: updatedConversations.length }
+								: null,
+							error: updateError,
+						});
+
+						if (updatedConversations) {
+							const transformedUpdatedConversations = (
+								updatedConversations as ConversationResponse[]
+							)
+								.map((conv) => {
 									const otherParticipant = conv.conversation_participants.find(
 										(p) => p.user_id !== user.id,
 									);
 									if (!otherParticipant) return null;
 									return {
 										id: conv.id,
-										participant: otherParticipant,
+										participant: {
+											user_id: otherParticipant.user_id,
+											profiles: otherParticipant.profiles,
+										},
 									};
 								})
-								.filter((conv): conv is Conversation => conv !== null) || [];
+								.filter((conv): conv is Conversation => conv !== null);
 
-						setConversations(transformedConversations);
+							setConversations(transformedUpdatedConversations);
+						}
 					},
 				)
 				.subscribe();
 
 			return () => {
-				conversationSubscription.unsubscribe();
+				subscription.unsubscribe();
 			};
-		}
+		};
 
+		setupSubscription();
+	}, [workspaceId]);
+
+	// Load initial data
+	useEffect(() => {
 		loadInitialData();
-	}, [workspaceId, supabase]);
+	}, [loadInitialData]);
 
 	return (
 		<div className="w-64 bg-custom-background-secondary border-r border-custom-ui-medium flex flex-col">
@@ -285,6 +359,13 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 						size="sm"
 						onClick={async () => {
 							await supabase.auth.signOut();
+							await logDB({
+								operation: "DELETE",
+								table: "auth.sessions",
+								description: "User signing out",
+								result: { success: true },
+								error: null,
+							});
 							router.push("/auth");
 						}}
 						className="text-custom-text-secondary hover:text-custom-text hover:bg-custom-ui-faint"
@@ -297,6 +378,7 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
 			{/* Background Channel Prefetcher */}
 			<ChannelPrefetcher
 				workspaceId={workspaceId}
+				activeChannelId={activeChannelId || undefined}
 				onChannelsLoaded={handleChannelsLoaded}
 			/>
 		</div>

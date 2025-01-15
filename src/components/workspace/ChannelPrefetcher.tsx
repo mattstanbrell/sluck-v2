@@ -4,9 +4,12 @@ import { useEffect, useRef } from "react";
 import { createClient } from "@/utils/supabase/client";
 import type { ChannelBasic } from "@/types/channel";
 import { useMessageCache } from "@/components/messages/MessageCache";
+import { logDB } from "@/utils/logging";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 
 interface ChannelPrefetcherProps {
 	workspaceId: string;
+	activeChannelId?: string;
 	onChannelsLoaded: (
 		joinedChannels: ChannelBasic[],
 		unjoinedChannels: ChannelBasic[],
@@ -18,6 +21,7 @@ const DEBOUNCE_TIME = 5000;
 
 export function ChannelPrefetcher({
 	workspaceId,
+	activeChannelId,
 	onChannelsLoaded,
 }: ChannelPrefetcherProps) {
 	const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
@@ -27,6 +31,8 @@ export function ChannelPrefetcher({
 	const { updateChannelMessages } = useMessageCache();
 
 	useEffect(() => {
+		if (!workspaceId) return;
+
 		const supabase = createClient();
 
 		async function prefetchChannelMessages(channelId: string) {
@@ -56,6 +62,14 @@ export function ChannelPrefetcher({
 				.is("parent_id", null)
 				.order("created_at", { ascending: true });
 
+			await logDB({
+				operation: "SELECT",
+				table: "messages",
+				description: `Prefetching messages for channel ${channelId}${channelId === activeChannelId ? " (active)" : ""}`,
+				result: data ? { count: data.length } : null,
+				error,
+			});
+
 			if (error) {
 				console.error("[Background] Failed to prepare channel:", channelId);
 				return;
@@ -65,45 +79,54 @@ export function ChannelPrefetcher({
 				console.log("[Background] Channel ready:", {
 					channel: channelId,
 					messageCount: data.length,
+					isActive: channelId === activeChannelId,
 				});
 				updateChannelMessages(channelId, data);
 			}
 		}
 
 		async function prefetchChannels() {
-			const now = Date.now();
-			// If less than DEBOUNCE_TIME has passed since last fetch, skip
-			if (now - lastFetchRef.current < DEBOUNCE_TIME) {
-				return;
-			}
-			lastFetchRef.current = now;
-
 			console.log("[Background] Getting list of available channels...");
 
-			// Get all channels
 			const { data: allChannels, error: channelsError } = await supabase
 				.from("channels")
-				.select("id, name, slug, description")
-				.eq("workspace_id", workspaceId)
-				.order("name");
+				.select("*")
+				.eq("workspace_id", workspaceId);
+
+			await logDB({
+				operation: "SELECT",
+				table: "channels",
+				description: `Listing all channels for workspace ${workspaceId}`,
+				result: allChannels ? { count: allChannels.length } : null,
+				error: channelsError,
+			});
 
 			if (channelsError) {
-				console.error(
-					"[Background] Failed to get channel list:",
-					channelsError,
-				);
+				console.error("[Background] Failed to list channels:", channelsError);
 				return;
 			}
 
-			// Get joined channels
+			const {
+				data: { user },
+			} = await supabase.auth.getUser();
+			if (!user) return;
+
 			const { data: joinedChannelIds, error: membershipError } = await supabase
 				.from("channel_members")
 				.select("channel_id")
-				.eq("user_id", (await supabase.auth.getUser()).data.user?.id);
+				.eq("user_id", user.id);
+
+			await logDB({
+				operation: "SELECT",
+				table: "channel_members",
+				description: `Checking channel memberships for workspace ${workspaceId}`,
+				result: joinedChannelIds ? { count: joinedChannelIds.length } : null,
+				error: membershipError,
+			});
 
 			if (membershipError) {
 				console.error(
-					"[Background] Failed to get joined channels:",
+					"[Background] Failed to check channel memberships:",
 					membershipError,
 				);
 				return;
@@ -111,8 +134,13 @@ export function ChannelPrefetcher({
 
 			if (allChannels) {
 				const joinedIds = new Set(joinedChannelIds?.map((m) => m.channel_id));
-				const joinedChannels = allChannels.filter((c) => joinedIds.has(c.id));
-				const unjoinedChannels = allChannels.filter(
+				const workspaceChannels = allChannels.filter(
+					(c) => c.workspace_id === workspaceId,
+				);
+				const joinedChannels = workspaceChannels.filter((c) =>
+					joinedIds.has(c.id),
+				);
+				const unjoinedChannels = workspaceChannels.filter(
 					(c) => !joinedIds.has(c.id),
 				);
 
@@ -121,56 +149,78 @@ export function ChannelPrefetcher({
 					available: unjoinedChannels.length,
 				});
 
+				// Update sidebar with channel lists
 				onChannelsLoaded(joinedChannels, unjoinedChannels);
 
-				// After loading channels, prefetch messages for joined channels
-				if (joinedChannels.length > 0) {
-					console.log(
-						"[Background] Preparing messages for all joined channels...",
-					);
-					for (const channel of joinedChannels) {
-						await prefetchChannelMessages(channel.id);
-					}
-					console.log("[Background] ✨ All channels ready!");
+				// Sort channels so active channel is first
+				const sortedChannels = joinedChannels.sort((a, b) => {
+					if (a.id === activeChannelId) return -1;
+					if (b.id === activeChannelId) return 1;
+					return 0;
+				});
+
+				console.log(
+					"[Background] Preparing messages for all joined channels...",
+				);
+
+				// Load messages for each channel sequentially
+				for (const channel of sortedChannels) {
+					await prefetchChannelMessages(channel.id);
 				}
+
+				console.log("[Background] ✨ All channels ready!");
 			}
 		}
 
-		// Initial fetch
-		prefetchChannels();
+		async function setupSubscription() {
+			const {
+				data: { user },
+			} = await supabase.auth.getUser();
+			if (!user) return;
 
-		// Set up subscription for real-time updates
-		const channelSubscription = supabase
-			.channel("channel-changes")
-			.on(
-				"postgres_changes",
-				{
-					event: "*",
-					schema: "public",
-					table: "channels",
-					filter: `workspace_id=eq.${workspaceId}`,
-				},
-				() => {
-					// Clear any existing timeout
-					if (timeoutRef.current) {
-						clearTimeout(timeoutRef.current);
-					}
-					// Set a new timeout to debounce the fetch
-					timeoutRef.current = setTimeout(() => {
-						console.log("[Background] Channel list changed, updating...");
-						prefetchChannels();
-					}, DEBOUNCE_TIME);
-				},
-			)
-			.subscribe();
+			return supabase
+				.channel("channel-changes")
+				.on(
+					"postgres_changes",
+					{
+						event: "*",
+						schema: "public",
+						table: "channel_members",
+						filter: `user_id=eq.${user.id}`,
+					},
+					() => {
+						// Clear any existing timeout
+						if (timeoutRef.current) {
+							clearTimeout(timeoutRef.current);
+						}
+						// Set a new timeout to debounce the fetch
+						timeoutRef.current = setTimeout(() => {
+							console.log(
+								"[Background] Channel membership changed, updating...",
+							);
+							prefetchChannels();
+						}, DEBOUNCE_TIME);
+					},
+				)
+				.subscribe();
+		}
+
+		// Initial fetch and subscription setup
+		prefetchChannels();
+		let subscription: RealtimeChannel | undefined;
+		setupSubscription().then((sub) => {
+			subscription = sub;
+		});
 
 		return () => {
 			if (timeoutRef.current) {
 				clearTimeout(timeoutRef.current);
 			}
-			channelSubscription.unsubscribe();
+			if (subscription) {
+				subscription.unsubscribe();
+			}
 		};
-	}, [workspaceId, onChannelsLoaded, updateChannelMessages]);
+	}, [workspaceId, activeChannelId, updateChannelMessages, onChannelsLoaded]);
 
 	return null; // This is a utility component, it doesn't render anything
 }

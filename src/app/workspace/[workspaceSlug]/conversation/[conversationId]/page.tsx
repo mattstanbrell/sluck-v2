@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { MessageContainer } from "@/components/messages/MessageContainer";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import type { ConversationWithParticipants } from "@/types/conversation";
+import { logDB } from "@/utils/logging";
 
 type DatabaseConversation = ConversationWithParticipants;
 
@@ -12,11 +13,6 @@ export default async function ConversationPage({
 	params: Promise<{ workspaceSlug: string; conversationId: string }>;
 }) {
 	const { workspaceSlug, conversationId } = await params;
-	console.log("[ConversationPage] Params =>", {
-		workspaceSlug,
-		conversationId,
-	});
-
 	const supabase = await createClient();
 
 	// Get current user for logging
@@ -24,41 +20,35 @@ export default async function ConversationPage({
 		data: { user },
 		error: userError,
 	} = await supabase.auth.getUser();
-	console.log("[ConversationPage] Current user =>", user?.id);
-	if (userError) {
-		console.error("[ConversationPage] Error getting user:", userError);
-	}
+
+	logDB({
+		operation: "SELECT",
+		table: "auth.users",
+		description: "Getting current user for conversation page",
+		result: user ? { id: user.id } : null,
+		error: userError,
+	});
 
 	// Get workspace ID from slug
-	console.log(
-		"[ConversationPage] Getting workspace for slug =>",
-		workspaceSlug,
-	);
 	const { data: workspace, error: workspaceError } = await supabase
 		.from("workspaces")
 		.select("id, name")
 		.eq("slug", workspaceSlug)
 		.single();
 
-	if (workspaceError) {
-		console.error("[ConversationPage] Workspace error:", workspaceError);
-	}
-	console.log("[ConversationPage] Workspace =>", workspace);
+	logDB({
+		operation: "SELECT",
+		table: "workspaces",
+		description: `Fetching workspace by slug (${workspaceSlug})`,
+		result: workspace,
+		error: workspaceError,
+	});
 
 	if (!workspace) {
-		console.log("[ConversationPage] Workspace not found");
 		notFound();
 	}
 
-	// Log the query parameters
-	console.log("[ConversationPage] Query params =>", {
-		conversationId,
-		workspaceId: workspace.id,
-		type: "direct",
-	});
-
 	// Get conversation and other participant's profile
-	console.log("[ConversationPage] Getting conversation =>", conversationId);
 	const { data: conversation, error: conversationError } = await supabase
 		.from("conversations")
 		.select(`
@@ -78,13 +68,15 @@ export default async function ConversationPage({
 		.eq("type", "direct")
 		.single();
 
-	if (conversationError) {
-		console.error("[ConversationPage] Conversation error:", conversationError);
-	}
-	console.log("[ConversationPage] Conversation =>", conversation);
+	logDB({
+		operation: "SELECT",
+		table: "conversations",
+		description: `Fetching conversation with participants (${conversationId})`,
+		result: conversation,
+		error: conversationError,
+	});
 
 	if (!conversation) {
-		console.log("[ConversationPage] Conversation not found");
 		notFound();
 	}
 
@@ -93,10 +85,7 @@ export default async function ConversationPage({
 		conversation as unknown as DatabaseConversation
 	).conversation_participants.find((p) => p.user_id !== user?.id)?.profiles;
 
-	console.log("[ConversationPage] Other participant =>", otherParticipant);
-
 	if (!otherParticipant) {
-		console.log("[ConversationPage] Other participant not found");
 		notFound();
 	}
 

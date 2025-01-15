@@ -3,6 +3,7 @@
 import { createClient } from "@/utils/supabase/client";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
+import { logDB } from "@/utils/logging";
 
 interface UnjoinedChannelViewProps {
 	channelId: string;
@@ -17,16 +18,39 @@ export function UnjoinedChannelView({
 	const supabase = createClient();
 
 	const handleJoinChannel = async () => {
+		// Get current user
+		const {
+			data: { user },
+			error: authError,
+		} = await supabase.auth.getUser();
+
+		logDB({
+			operation: "SELECT",
+			table: "auth.users",
+			description: "Getting current user for channel join",
+			result: user ? { id: user.id } : null,
+			error: authError,
+		});
+
+		if (!user) return;
+
+		// Join channel
 		const { error } = await supabase.from("channel_members").insert([
 			{
 				channel_id: channelId,
-				user_id: (await supabase.auth.getUser()).data.user?.id,
+				user_id: user.id,
 				role: "member",
 			},
 		]);
 
+		logDB({
+			operation: "INSERT",
+			table: "channel_members",
+			description: `User ${user.id} joining channel ${channelId}`,
+			error: error,
+		});
+
 		if (error) {
-			console.error("Error joining channel:", error);
 			return;
 		}
 

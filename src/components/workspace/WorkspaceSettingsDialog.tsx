@@ -14,6 +14,7 @@ import { createClient } from "@/utils/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { generateWorkspaceInvite } from "@/app/actions/workspace";
 import type { WorkspaceWithInvite } from "@/types/workspace";
+import { logDB } from "@/utils/logging";
 
 export function WorkspaceSettingsDialog({
 	workspaceId,
@@ -38,6 +39,14 @@ export function WorkspaceSettingsDialog({
 			.eq("id", workspaceId)
 			.single();
 
+		await logDB({
+			operation: "SELECT",
+			table: "workspaces",
+			description: `Loading invite data for workspace ${workspaceId}`,
+			result: data ? { id: data.id, has_invite: !!data.invite_code } : null,
+			error,
+		});
+
 		if (error) {
 			console.error("Failed to load invite data:", error);
 			return;
@@ -59,9 +68,25 @@ export function WorkspaceSettingsDialog({
 		try {
 			const data = await generateWorkspaceInvite(workspaceId);
 
+			await logDB({
+				operation: "UPDATE",
+				table: "workspaces",
+				description: `Generated new invite code for workspace ${workspaceId}`,
+				result: data ? { id: data.id, has_invite: !!data.invite_code } : null,
+				error: null,
+			});
+
 			// Update the local state immediately
 			setInviteData(data);
-		} catch {
+		} catch (error) {
+			await logDB({
+				operation: "UPDATE",
+				table: "workspaces",
+				description: `Failed to generate invite code for workspace ${workspaceId}`,
+				result: null,
+				error,
+			});
+
 			toast({
 				title: "Error",
 				description: "Failed to generate invite code",

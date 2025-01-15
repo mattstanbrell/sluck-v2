@@ -4,6 +4,7 @@ import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { MessageCacheProvider } from "@/components/messages/MessageCache";
 import { ChatDialog } from "@/components/ChatDialog";
+import { ProfileCacheProvider } from "@/components/providers/ProfileCacheProvider";
 
 const geistSans = Geist({
 	variable: "--font-geist-sans",
@@ -30,11 +31,13 @@ export default function RootLayout({
 			<body
 				className={`${geistSans.variable} ${geistMono.variable} antialiased`}
 			>
-				<MessageCacheProvider>
-					{children}
-					<Toaster />
-					<ChatDialog />
-				</MessageCacheProvider>
+				<ProfileCacheProvider>
+					<MessageCacheProvider>
+						{children}
+						<Toaster />
+						<ChatDialog />
+					</MessageCacheProvider>
+				</ProfileCacheProvider>
 			</body>
 		</html>
 	);
