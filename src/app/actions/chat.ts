@@ -64,9 +64,27 @@ export async function streamChat(messages: Message[]) {
 		};
 
 		// Search for relevant context
-		console.log("[streamChat] Searching for relevant context...");
+		console.log("\n[streamChat] Starting semantic search...");
+		console.log("[streamChat] Search query:", userMessage.content);
+
+		// Check if there are any messages with embeddings
+		const { count: embeddingCount } = await supabase
+			.from("messages")
+			.select("*", { count: "exact", head: true })
+			.not("embedding", "is", null);
+
+		console.log("[streamChat] Messages with embeddings:", embeddingCount);
+
 		const searchResults = await searchMessages(userMessage.content);
-		console.log("[streamChat] Found context results:", searchResults.length);
+		console.log("[streamChat] Search results:", {
+			count: searchResults.length,
+			results: searchResults.map((r) => ({
+				similarity: r.similarity,
+				channel: r.channel_name,
+				preview: `${r.content.substring(0, 50)}...`,
+				hasContext: !!r.context,
+			})),
+		});
 
 		// Format context as a system message
 		let contextMessage: Message | null = null;
@@ -77,14 +95,86 @@ export async function streamChat(messages: Message[]) {
 					similarity: r.similarity,
 					channel: r.channel_name,
 					preview: `${r.content.substring(0, 50)}...`,
+					context: r.context ? `${r.context.substring(0, 50)}...` : null,
+					chainMessages: r.chain_messages?.length || 0,
 				})),
 			);
 
 			const contextStr = searchResults
-				.map(
-					(msg) =>
-						`[${msg.sender_name} in ${msg.channel_name || "DM"}]: ${msg.content}`,
-				)
+				.map((msg) => {
+					const date = new Date(msg.created_at);
+					const formattedDate = date.toLocaleDateString("en-GB", {
+						weekday: "long",
+						day: "numeric",
+						month: "long",
+						year: "numeric",
+					});
+
+					// If there are chain messages, format them together
+					if (msg.chain_messages?.length) {
+						const lines = [];
+
+						// Add the generated context if available
+						if (msg.context) {
+							lines.push(msg.context);
+						}
+
+						// Add the header with sender and channel
+						lines.push(
+							`[${msg.sender_name} said in ${msg.channel_name || "DM"} channel on ${formattedDate}]:`,
+						);
+
+						// Add all messages in the chain
+						for (const chainMsg of msg.chain_messages) {
+							const chainDate = new Date(chainMsg.created_at);
+							const time = chainDate.toLocaleTimeString("en-GB", {
+								hour: "2-digit",
+								minute: "2-digit",
+							});
+							lines.push(`[${time}]: ${chainMsg.content}`);
+						}
+
+						// Add the final message
+						const time = date.toLocaleTimeString("en-GB", {
+							hour: "2-digit",
+							minute: "2-digit",
+						});
+						lines.push(`[${time}]: ${msg.content}`);
+
+						console.log("[streamChat] Formatted chain message:", {
+							sender: msg.sender_name,
+							channel: msg.channel_name,
+							chainLength: msg.chain_messages.length + 1,
+							context: msg.context || "(no context)",
+							preview: `${lines.join("\n").substring(0, 200)}...`,
+						});
+
+						return lines.join("\n");
+					}
+
+					// Single message format
+					const lines = [];
+					if (msg.context) {
+						lines.push(msg.context);
+					}
+
+					const time = date.toLocaleTimeString("en-GB", {
+						hour: "2-digit",
+						minute: "2-digit",
+					});
+					lines.push(
+						`[${msg.sender_name} said in ${msg.channel_name || "DM"} channel on ${formattedDate}, ${time}]: ${msg.content}`,
+					);
+
+					console.log("[streamChat] Formatted single message:", {
+						sender: msg.sender_name,
+						channel: msg.channel_name,
+						context: msg.context || "(no context)",
+						preview: `${lines.join("\n").substring(0, 200)}...`,
+					});
+
+					return lines.join("\n");
+				})
 				.join("\n\n");
 
 			contextMessage = {
@@ -97,6 +187,7 @@ export async function streamChat(messages: Message[]) {
 				id: contextMessage.id,
 				contentLength: contextMessage.content.length,
 				contextCount: searchResults.length,
+				preview: contextMessage.content,
 			});
 		} else {
 			console.log("[streamChat] No relevant context found");

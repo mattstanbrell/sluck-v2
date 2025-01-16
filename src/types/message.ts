@@ -56,6 +56,7 @@ export interface MessageContext {
 	channelName: string | null;
 	conversationId: string | null;
 	recipientName: string | null;
+	generatedContext?: string | null;
 }
 
 export interface MessageChainContext {

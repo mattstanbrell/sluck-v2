@@ -206,7 +206,7 @@ export function MessageInput({
 			console.log("[MessageInput] Getting latest message...");
 			const { data: latestMessage } = await supabase
 				.from("messages")
-				.select(`user_id, created_at`)
+				.select("user_id, created_at")
 				.eq(
 					channelId ? "channel_id" : "conversation_id",
 					channelId || conversationId,

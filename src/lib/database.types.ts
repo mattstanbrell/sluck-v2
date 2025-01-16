@@ -181,6 +181,8 @@ export interface Database {
 					content: string;
 					created_at: string;
 					parent_id: string | null;
+					context: string | null;
+					embedding: number[] | null;
 					profiles?: {
 						id: string;
 						full_name: string;
@@ -197,6 +199,8 @@ export interface Database {
 					content: string;
 					created_at?: string;
 					parent_id?: string | null;
+					context?: string | null;
+					embedding?: number[] | null;
 				};
 				Update: {
 					id?: string;
@@ -206,6 +210,8 @@ export interface Database {
 					content?: string;
 					created_at?: string;
 					parent_id?: string | null;
+					context?: string | null;
+					embedding?: number[] | null;
 				};
 			};
 		};
@@ -218,7 +224,11 @@ export interface Database {
 				};
 				Returns: {
 					id: string;
+					conversation_id: string | null;
+					channel_id: string | null;
+					user_id: string;
 					content: string;
+					context: string | null;
 					similarity: number;
 				}[];
 			};

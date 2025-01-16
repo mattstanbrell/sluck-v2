@@ -4,6 +4,7 @@
 /prev-message-implementation
 sluck-messages-doc.md
 sluck.md
+/src/app/seed
 
 # dependencies
 /node_modules

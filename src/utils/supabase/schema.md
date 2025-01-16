@@ -282,6 +282,7 @@ CREATE TABLE messages (
   reply_count INTEGER NOT NULL DEFAULT 0,
   reply_user_ids UUID[] NOT NULL DEFAULT '{}',
   embedding vector(1024), -- Vector embedding of message content for semantic search
+  context TEXT, -- Contextual information about the message chain
   CONSTRAINT message_container_check CHECK (
     (conversation_id IS NULL AND channel_id IS NOT NULL) 
     OR 
@@ -296,6 +297,40 @@ CREATE TABLE messages (
 CREATE INDEX messages_embedding_idx
 ON messages
 USING hnsw (embedding vector_cosine_ops);
+
+-- Message similarity search function
+CREATE OR REPLACE FUNCTION match_messages(
+  query_embedding vector(1536),
+  match_threshold float,
+  match_count int
+)
+RETURNS TABLE (
+  id uuid,
+  conversation_id uuid,
+  channel_id uuid,
+  user_id uuid,
+  content text,
+  context text,
+  similarity float
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    m.id,
+    m.conversation_id,
+    m.channel_id,
+    m.user_id,
+    m.content,
+    m.context,  -- Added context column
+    1 - (m.embedding <=> query_embedding) AS similarity
+  FROM messages m
+  WHERE 1 - (m.embedding <=> query_embedding) > match_threshold
+  ORDER BY (m.embedding <=> query_embedding)
+  LIMIT match_count;
+END;
+$$;
 
 -- Thread reply tracking trigger function
 CREATE OR REPLACE FUNCTION update_parent_thread_info()
@@ -1068,3 +1103,16 @@ This enables efficient display of thread indicators without additional queries:
 - Show reply count directly from the parent message
 - Display up to 3 replier avatars using the stored user IDs
 - Maintain consistency via trigger-based updates
+
+### Message Context and Embeddings
+- Messages store both embeddings and contextual information
+- Context field captures the relationship between messages in a chain
+- Embeddings are generated with context for better semantic search
+- When a new message is added to a chain:
+  - Previous messages in the chain have their embeddings cleared
+  - The latest message gets an embedding that includes chain context
+  - This ensures each chain is represented by a single embedding
+- The match_messages function returns both content and context
+  - Helps AI understand the full conversation flow
+  - Provides better context for semantic search results
+  - Makes search results more meaningful to users
