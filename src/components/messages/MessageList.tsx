@@ -469,10 +469,7 @@ const ChainGroup = memo(function ChainGroup({
 						/>
 					</div>
 					<div className="relative">
-						<MessageContent
-							content={firstMessage.content}
-							files={firstMessage.files}
-						/>
+						<MessageContent message={firstMessage} />
 						{showThreadButton &&
 							onThreadClick &&
 							firstMessage.reply_count > 0 && (
@@ -539,10 +536,7 @@ const ChainGroup = memo(function ChainGroup({
 								<MessageTimestamp timestamp={message.created_at} hideColon />
 							</div>
 							<div className="relative">
-								<MessageContent
-									content={message.content}
-									files={message.files}
-								/>
+								<MessageContent message={message} />
 								{showThreadButton &&
 									onThreadClick &&
 									message.reply_count > 0 && (

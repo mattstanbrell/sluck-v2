@@ -19,15 +19,6 @@ export function ThreadRepliesIndicator({
 	onClick,
 	highlightedMessageId,
 }: ThreadRepliesIndicatorProps) {
-	console.log("[ThreadRepliesIndicator]", {
-		messageId,
-		replyUserIds,
-		profilesCount: Object.keys(profiles).length,
-		displayedProfilesCount: replyUserIds
-			.map((id) => profiles[id])
-			.filter(Boolean).length,
-	});
-
 	const displayedProfiles = replyUserIds
 		.map((id) => profiles[id])
 		.filter(Boolean)
@@ -50,22 +41,23 @@ export function ThreadRepliesIndicator({
 			className="flex items-center gap-1.5 hover:text-custom-text text-custom-text-tertiary mt-1 ml-3.5 w-fit text-xs transition-colors"
 			onClick={onClick}
 			onKeyDown={handleKeyDown}
+			tabIndex={0}
 		>
-			<ListEnd className={`h-4 w-4 -scale-x-100 ${textColorClass}`} />
-			<div className="flex -space-x-1">
-				{displayedProfiles.map((profile) => (
-					<UserAvatar
-						key={profile.id}
-						fullName={profile.full_name || "User"}
-						displayName={profile.display_name}
-						avatarUrl={profile.avatar_url}
-						avatarCache={profile.avatar_cache}
-						avatarColor={profile.avatar_color}
-						size="2xs"
-						className="ring-1 ring-custom-background"
-					/>
-				))}
-			</div>
+			<ListEnd className="h-4 w-4 -scale-x-100" />
+			{displayedProfiles.length > 0 && (
+				<div className="flex -space-x-2 ml-1">
+					{displayedProfiles.map((profile) => (
+						<UserAvatar
+							key={profile.id}
+							fullName={profile.full_name}
+							displayName={profile.display_name}
+							avatarUrl={profile.avatar_url}
+							avatarCache={profile.avatar_cache}
+							size="xs"
+						/>
+					))}
+				</div>
+			)}
 		</button>
 	);
 }

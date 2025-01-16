@@ -4,6 +4,13 @@ import type { ProfileDisplay } from "./profile";
 export type DatabaseFile = Database["public"]["Tables"]["files"]["Row"];
 export type DatabaseMessage = Database["public"]["Tables"]["messages"]["Row"];
 
+export type MessageStatus =
+	| "sending"
+	| "sent"
+	| "failed"
+	| "embedding"
+	| "complete";
+
 export interface Message extends Omit<DatabaseMessage, "files" | "profiles"> {
 	profile: ProfileDisplay & {
 		id: string;
@@ -11,6 +18,8 @@ export interface Message extends Omit<DatabaseMessage, "files" | "profiles"> {
 	reply_count: number;
 	reply_user_ids: string[];
 	files: DatabaseFile[];
+	status?: MessageStatus;
+	error?: string;
 }
 
 export interface MessageGroup {

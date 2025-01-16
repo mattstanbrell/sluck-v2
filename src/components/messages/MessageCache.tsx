@@ -8,11 +8,11 @@ import {
 	useCallback,
 } from "react";
 import { createClient } from "@/utils/supabase/client";
-import type { Message } from "@/types/message";
+import type { Message, MessageStatus } from "@/types/message";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
 interface MessageCache {
-	[key: string]: {
+	[channelId: string]: {
 		mainView: Message[];
 		threads: Record<string, Message[]>;
 	};
@@ -112,10 +112,19 @@ export function MessageCacheProvider({
 				},
 				async (payload: RealtimePostgresChangesPayload<MessagePayload>) => {
 					const newMessage = payload.new as MessagePayload;
+					const oldMessage = payload.old as MessagePayload;
 					if (!newMessage?.id) return;
 
+					console.log("[MessageCache] Received message event:", {
+						type: payload.eventType,
+						id: newMessage.id,
+						old: oldMessage ? { id: oldMessage.id } : null,
+						new: { id: newMessage.id },
+					});
+
 					// Fetch the complete message data with profile and files
-					const { data: message } = await supabase
+					console.log("[MessageCache] Fetching complete message data...");
+					const { data: message, error } = await supabase
 						.from("messages")
 						.select(
 							`*,
@@ -133,12 +142,51 @@ export function MessageCacheProvider({
 								file_name,
 								file_size,
 								file_url
-							)`,
+							),
+							reply_count,
+							reply_user_ids`,
 						)
 						.eq("id", newMessage.id)
 						.single();
 
+					if (error) {
+						console.error("[MessageCache] Error fetching message:", error);
+						return;
+					}
+
+					console.log("[MessageCache] Fetched message data:", {
+						id: message.id,
+						type: payload.eventType,
+						hasEmbedding: !!message.embedding,
+						embedding: message.embedding ? "present" : "null",
+						channelId: message.channel_id,
+						parentId: message.parent_id,
+					});
+
 					if (message?.channel_id) {
+						if (payload.eventType === "INSERT") {
+							console.log("[MessageCache] Message added to database:", {
+								id: message.id,
+								channel: message.channel_id,
+								content:
+									message.content.substring(0, 50) +
+									(message.content.length > 50 ? "..." : ""),
+							});
+						}
+						if (payload.eventType === "UPDATE") {
+							console.log("[MessageCache] Message updated in database:", {
+								id: message.id,
+								channel: message.channel_id,
+								content:
+									message.content.substring(0, 50) +
+									(message.content.length > 50 ? "..." : ""),
+								hasEmbedding: !!message.embedding,
+								embedding: message.embedding ? "present" : "null",
+							});
+						}
+
+						console.log("[MessageCache] Updating messages state...");
+
 						setMessages((prev) => {
 							const channelCache = prev[message.channel_id] || {
 								mainView: [],

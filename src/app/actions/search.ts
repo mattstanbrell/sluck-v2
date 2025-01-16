@@ -32,13 +32,13 @@ export async function searchMessages(query: string): Promise<SearchResult[]> {
 	// Search for similar messages using the match_messages function
 	console.log("[searchMessages] Calling match_messages with:", {
 		match_threshold: 0.1,
-		match_count: 5,
+		match_count: 20,
 	});
 
 	const { data: results, error } = await supabase.rpc("match_messages", {
 		query_embedding: embedding,
 		match_threshold: 0.1,
-		match_count: 5,
+		match_count: 20,
 	});
 
 	if (error) {
