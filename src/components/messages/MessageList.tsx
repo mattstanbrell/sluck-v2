@@ -259,7 +259,9 @@ export function MessageList({
 							file_type,
 							file_name,
 							file_size,
-							file_url
+							file_url,
+							caption,
+							description
 						),
 						reply_count,
 						reply_user_ids`,

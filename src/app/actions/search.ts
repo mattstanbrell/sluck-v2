@@ -4,8 +4,16 @@ import type { Database } from "@/lib/database.types";
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
-type MatchResult =
-	Database["public"]["Functions"]["match_messages"]["Returns"][0];
+type MatchResult = {
+	id: string;
+	conversation_id: string | null;
+	channel_id: string | null;
+	user_id: string;
+	content: string;
+	context: string | null;
+	formatted_chain: string | null;
+	similarity: number;
+};
 
 type DatabaseMessage = Database["public"]["Tables"]["messages"]["Row"];
 
@@ -19,6 +27,7 @@ interface RawDatabaseMessage {
 	created_at: string;
 	parent_id: string | null;
 	embedding: number[] | null;
+	formatted_chain: string | null;
 	profiles:
 		| {
 				id: string;
@@ -47,186 +56,214 @@ type MessageWithProfile = DatabaseMessage & {
 	chain_messages?: ChainMessage[];
 };
 
-type ChainMessage = {
+interface ChainMessage {
+	id: string;
 	content: string;
 	created_at: string;
-};
+}
+
+interface RawSearchResult {
+	id: string;
+	content: string;
+	created_at: string;
+	channel_id: string | null;
+	conversation_id: string | null;
+	user_id: string;
+	parent_id: string | null;
+	context: string | null;
+	embedding: number[] | null;
+	formatted_chain: string | null;
+	similarity: number;
+	profile?: {
+		id: string;
+		display_name: string | null;
+		full_name: string;
+	} | null;
+	channel?: {
+		id: string;
+		name: string;
+	} | null;
+	chain_messages?: ChainMessage[];
+}
+
+interface DatabaseSearchResult {
+	id: string;
+	content: string;
+	created_at: string;
+	channel_id: string | null;
+	conversation_id: string | null;
+	user_id: string;
+	parent_id: string | null;
+	context: string | null;
+	embedding: number[] | null;
+	formatted_chain: string | null;
+	similarity: number;
+	chain_messages: {
+		id: string;
+		content: string;
+		created_at: string;
+	}[];
+	profile: {
+		id: string;
+		display_name: string | null;
+		full_name: string;
+	} | null;
+	channel: {
+		id: string;
+		name: string;
+	} | null;
+}
+
+interface RawDatabaseResult {
+	id: string;
+	content: string;
+	created_at: string;
+	channel_id: string | null;
+	conversation_id: string | null;
+	user_id: string;
+	parent_id: string | null;
+	context: string | null;
+	embedding: number[] | null;
+	formatted_chain: string | null;
+	similarity: number;
+	chain_messages?: {
+		id: string;
+		content: string;
+		created_at: string;
+	}[];
+	profile?:
+		| {
+				id: string;
+				display_name: string | null;
+				full_name: string;
+		  }[]
+		| null;
+	channel?:
+		| {
+				id: string;
+				name: string;
+		  }[]
+		| null;
+}
 
 export interface SearchResult {
 	id: string;
 	content: string;
-	context: string | null;
-	channel_name: string | null;
-	sender_name: string;
 	created_at: string;
-	chain_messages?: ChainMessage[];
+	channel_id: string | null;
+	conversation_id: string | null;
+	user_id: string;
+	parent_id: string | null;
+	context: string | null;
+	embedding: number[] | null;
+	formatted_chain: string | null;
+	sender_name: string;
+	channel_name: string | null;
 	similarity: number;
+	chain_messages?: ChainMessage[];
 }
 
 export async function searchMessages(query: string): Promise<SearchResult[]> {
 	console.log("\n[searchMessages] Starting search with query:", query);
+
 	const supabase = await createClient();
 
 	// Generate embedding for the search query
-	console.log("[searchMessages] Generating query embedding...");
+	console.log("[searchMessages] Generating embeddings for query...");
 	const embeddings = await generateEmbeddings([query], "query");
-	const queryEmbedding = embeddings[0];
+	const embedding = embeddings[0];
 
-	if (!queryEmbedding) {
-		console.error("[searchMessages] Failed to generate query embedding");
+	if (!embedding) {
+		console.error("[searchMessages] Failed to generate embedding for query");
 		return [];
 	}
 	console.log(
-		"[searchMessages] Generated embedding of length:",
-		queryEmbedding.length,
+		"[searchMessages] Successfully generated embedding of length:",
+		embedding.length,
 	);
 
-	// Search for similar messages
-	console.log("[searchMessages] Calling match_messages RPC...");
-	const { data: matchResults, error: matchError } = await supabase.rpc(
+	// Search messages using the embedding
+	console.log("[searchMessages] Calling match_messages RPC with parameters:", {
+		match_threshold: 0.3,
+		match_count: 10,
+	});
+
+	const { data: matchResults, error: searchError } = await supabase.rpc(
 		"match_messages",
 		{
-			query_embedding: queryEmbedding,
-			match_threshold: 0.5,
-			match_count: 5,
-		} as Database["public"]["Functions"]["match_messages"]["Args"],
+			query_embedding: embedding,
+			match_threshold: 0.3,
+			match_count: 10,
+		},
 	);
 
-	if (matchError) {
-		console.error("[searchMessages] Match error:", matchError);
+	if (searchError) {
+		console.error("[searchMessages] Search RPC error:", searchError);
 		return [];
 	}
 
-	if (!matchResults || !Array.isArray(matchResults)) {
-		console.log("[searchMessages] No results array returned");
+	if (!matchResults) {
+		console.log("[searchMessages] No results found");
 		return [];
 	}
 
-	const matches = matchResults as MatchResult[];
+	console.log("[searchMessages] Found", matchResults.length, "results");
 
-	console.log("[searchMessages] RPC results:", {
-		count: matches.length,
-		results: matches.map((result) => ({
-			id: result.id,
-			similarity: result.similarity,
-			hasContent: !!result.content,
-			hasContext: !!result.context,
-		})),
-	});
-
-	if (!matches.length) {
-		console.log("[searchMessages] No matches found");
-		return [];
-	}
-
-	// Get additional context for matches
-	console.log("[searchMessages] Getting additional context for matches...");
-	const { data: rawMessages, error: contextError } = await supabase
-		.from("messages")
-		.select(
-			`
-			id,
-			content,
-			context,
-			channel_id,
-			conversation_id,
-			user_id,
-			created_at,
-			profiles:user_id (
-				id,
-				full_name,
-				display_name
-			),
-			channels:channel_id (
-				id,
-				name
-			)
-		`,
-		)
+	// Get profile and channel info for each result
+	const { data: profiles } = await supabase
+		.from("profiles")
+		.select("id, display_name, full_name")
 		.in(
 			"id",
-			matches.map((result) => result.id),
+			matchResults.map((r: MatchResult) => r.user_id),
 		);
 
-	if (contextError) {
-		console.error("[searchMessages] Context error:", contextError);
-		return [];
-	}
+	const { data: channels } = await supabase
+		.from("channels")
+		.select("id, name")
+		.in(
+			"id",
+			matchResults.map((r: MatchResult) => r.channel_id).filter(Boolean),
+		);
 
-	if (!rawMessages) {
-		console.log("[searchMessages] No messages found");
-		return [];
-	}
+	// Transform results
+	const searchResults = matchResults.map(
+		(result: MatchResult): SearchResult => {
+			const profile = profiles?.find((p) => p.id === result.user_id);
+			const channel = channels?.find((c) => c.id === result.channel_id);
 
-	// Type assertion for the raw messages
-	const messages: (Omit<MessageWithProfile, "chain_messages"> & {
-		chain_messages?: ChainMessage[];
-	})[] = (rawMessages as RawDatabaseMessage[]).map((msg) => ({
-		...msg,
-		profiles: Array.isArray(msg.profiles) ? msg.profiles[0] : msg.profiles,
-		channels: Array.isArray(msg.channels) ? msg.channels[0] : msg.channels,
-	}));
-
-	// For each message, get its chain messages
-	for (const msg of messages) {
-		const { data: chainMessages } = await supabase
-			.from("messages")
-			.select(
-				`
-				content,
-				created_at
-			`,
-			)
-			.eq(
-				msg.channel_id ? "channel_id" : "conversation_id",
-				msg.channel_id || msg.conversation_id,
-			)
-			.eq("user_id", msg.user_id)
-			.gte(
-				"created_at",
-				new Date(
-					new Date(msg.created_at).getTime() - ONE_HOUR_MS,
-				).toISOString(),
-			)
-			.lte("created_at", msg.created_at)
-			.order("created_at", { ascending: true });
-
-		msg.chain_messages = chainMessages || [];
-	}
-
-	// Format results by combining match results with message context
-	const searchResults = matches
-		.map((match): SearchResult | null => {
-			const msg = messages.find((m) => m.id === match.id);
-			if (!msg) {
-				console.log("[searchMessages] No context found for match:", match.id);
-				return null;
-			}
-			return {
-				id: match.id,
-				content: match.content,
-				context: match.context,
-				channel_name: msg.channels?.name ?? null,
+			const transformedResult: SearchResult = {
+				id: result.id,
+				content: result.content,
+				created_at: new Date().toISOString(), // match_messages doesn't return created_at
+				channel_id: result.channel_id,
+				conversation_id: result.conversation_id,
+				user_id: result.user_id,
+				parent_id: null, // match_messages doesn't return parent_id
+				context: result.context,
+				embedding: null, // We don't need to return the embedding
+				formatted_chain: result.formatted_chain,
+				similarity: result.similarity,
 				sender_name:
-					msg.profiles?.display_name || msg.profiles?.full_name || "Unknown",
-				created_at: msg.created_at,
-				chain_messages: msg.chain_messages,
-				similarity: match.similarity,
+					profile?.display_name || profile?.full_name || "Unknown User",
+				channel_name: channel?.name || null,
 			};
-		})
-		.filter((result): result is SearchResult => result !== null);
 
-	console.log("[searchMessages] Final results:", {
-		count: searchResults.length,
-		results: searchResults.map((r) => ({
-			id: r.id,
-			similarity: r.similarity,
-			hasContent: !!r.content,
-			hasContext: !!r.context,
-			hasChannel: !!r.channel_name,
-			hasSender: r.sender_name !== "Unknown",
-		})),
-	});
+			console.log("[searchMessages] Transformed result:", {
+				id: transformedResult.id,
+				sender: transformedResult.sender_name,
+				channel: transformedResult.channel_name,
+				similarity: transformedResult.similarity,
+			});
 
+			return transformedResult;
+		},
+	);
+
+	console.log(
+		"[searchMessages] Returning",
+		searchResults.length,
+		"final results",
+	);
 	return searchResults;
 }

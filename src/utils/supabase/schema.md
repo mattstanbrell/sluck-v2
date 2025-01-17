@@ -283,6 +283,7 @@ CREATE TABLE messages (
   reply_user_ids UUID[] NOT NULL DEFAULT '{}',
   embedding vector(1024), -- Vector embedding of message content for semantic search
   context TEXT, -- Contextual information about the message chain
+  formatted_chain TEXT, -- The formatted chain of messages in semantic format for embedding
   CONSTRAINT message_container_check CHECK (
     (conversation_id IS NULL AND channel_id IS NOT NULL) 
     OR 
@@ -300,7 +301,7 @@ USING hnsw (embedding vector_cosine_ops);
 
 -- Message similarity search function
 CREATE OR REPLACE FUNCTION match_messages(
-  query_embedding vector(1536),
+  query_embedding vector(1024),
   match_threshold float,
   match_count int
 )
@@ -311,6 +312,7 @@ RETURNS TABLE (
   user_id uuid,
   content text,
   context text,
+  formatted_chain text,
   similarity float
 )
 LANGUAGE plpgsql
@@ -323,7 +325,8 @@ BEGIN
     m.channel_id,
     m.user_id,
     m.content,
-    m.context,  -- Added context column
+    m.context,
+    m.formatted_chain,
     1 - (m.embedding <=> query_embedding) AS similarity
   FROM messages m
   WHERE 1 - (m.embedding <=> query_embedding) > match_threshold
@@ -447,7 +450,10 @@ CREATE TABLE files (
   file_name TEXT,
   file_size BIGINT,
   file_url TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  caption TEXT, -- Short description for text-based queries
+  description TEXT, -- Detailed description for semantic search
+  embedding vector(1024) -- Vector embedding for semantic similarity search
 );
 
 -- Enable Row Level Security
@@ -491,6 +497,24 @@ WITH CHECK (
   )
 );
 
+-- Update policy: users can update files attached to their own messages
+CREATE POLICY "Users can update files for their own messages"
+ON files FOR UPDATE
+TO authenticated
+USING (
+  EXISTS (
+    SELECT 1
+    FROM messages
+    WHERE messages.id = files.message_id
+      AND messages.user_id = auth.uid()
+  )
+);
+
+-- Create HNSW index for vector similarity search
+CREATE INDEX files_embedding_idx
+ON files
+USING hnsw (embedding vector_cosine_ops);
+
 -- Add to realtime publication
 ALTER PUBLICATION supabase_realtime ADD TABLE files;
 ```
@@ -498,9 +522,14 @@ ALTER PUBLICATION supabase_realtime ADD TABLE files;
 - Links each file to a message for context and permissions inheritance
 - Enforces RLS based on message visibility
 - Ensures users can only attach files to their own messages
+- Allows users to update files (captions, descriptions, embeddings) on their own messages
 - Tracks file metadata (type, name, size) for UI display
 - Stores file URL for access (typically an S3 URL)
-- Enables real-time updates for file attachments
+- Supports semantic search with:
+  - Short captions for quick text-based queries
+  - Detailed descriptions for richer context
+  - Vector embeddings for similarity search
+  - HNSW index for efficient vector queries
 
 ## Functions and Triggers
 
@@ -1104,15 +1133,18 @@ This enables efficient display of thread indicators without additional queries:
 - Display up to 3 replier avatars using the stored user IDs
 - Maintain consistency via trigger-based updates
 
-### Message Context and Embeddings
+### Message Context, Chains, and Embeddings
 - Messages store both embeddings and contextual information
 - Context field captures the relationship between messages in a chain
+- Formatted chain field stores the semantic format used for embeddings
 - Embeddings are generated with context for better semantic search
 - When a new message is added to a chain:
-  - Previous messages in the chain have their embeddings cleared
+  - Previous messages in the chain have their embeddings, context, and formatted chains cleared
   - The latest message gets an embedding that includes chain context
+  - The formatted chain is stored for debugging and reference
   - This ensures each chain is represented by a single embedding
-- The match_messages function returns both content and context
+- The match_messages function returns content, context, and formatted chain
   - Helps AI understand the full conversation flow
   - Provides better context for semantic search results
   - Makes search results more meaningful to users
+  - Enables consistent formatting between embedding generation and search result display

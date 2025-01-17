@@ -57,6 +57,7 @@ export interface MessageContext {
 	conversationId: string | null;
 	recipientName: string | null;
 	generatedContext?: string | null;
+	id?: string;
 }
 
 export interface MessageChainContext {

@@ -46,6 +46,11 @@ interface MessagePayload {
 	parent_id: string | null;
 }
 
+interface FilePayload {
+	id: string;
+	message_id: string;
+}
+
 export function MessageCacheProvider({
 	children,
 }: { children: React.ReactNode }) {
@@ -141,7 +146,9 @@ export function MessageCacheProvider({
 								file_type,
 								file_name,
 								file_size,
-								file_url
+								file_url,
+								caption,
+								description
 							),
 							reply_count,
 							reply_user_ids`,
@@ -280,6 +287,106 @@ export function MessageCacheProvider({
 							return prev;
 						});
 					}
+				},
+			)
+			.on(
+				"postgres_changes",
+				{
+					event: "*",
+					schema: "public",
+					table: "files",
+				},
+				async (payload: RealtimePostgresChangesPayload<FilePayload>) => {
+					const file = payload.new as FilePayload | null;
+					if (!file) return;
+
+					console.log("[MessageCache] Received file event:", {
+						type: payload.eventType,
+						messageId: file.message_id,
+						file: payload.new,
+						old: payload.old,
+					});
+
+					// Fetch the complete message data with profile and files
+					console.log("[MessageCache] Fetching updated message data...");
+					const { data: message, error } = await supabase
+						.from("messages")
+						.select(
+							`*,
+							profile:profiles (
+								id,
+								full_name,
+								display_name,
+								avatar_url,
+								avatar_color,
+								avatar_cache
+							),
+							files (
+								id,
+								file_type,
+								file_name,
+								file_size,
+								file_url,
+								caption,
+								description
+							),
+							reply_count,
+							reply_user_ids`,
+						)
+						.eq("id", file.message_id)
+						.single();
+
+					if (error) {
+						console.error("[MessageCache] Error fetching message:", error);
+						return;
+					}
+
+					console.log("[MessageCache] Fetched message data:", {
+						id: message.id,
+						type: payload.eventType,
+						files: message.files?.length || 0,
+					});
+
+					if (!message?.channel_id) return;
+
+					console.log("[MessageCache] Updating messages state...");
+
+					setMessages((prev) => {
+						const channelCache = prev[message.channel_id] || {
+							mainView: [],
+							threads: {},
+						};
+
+						if (message.parent_id) {
+							// Update thread messages
+							const threadMessages =
+								channelCache.threads[message.parent_id] || [];
+
+							return {
+								...prev,
+								[message.channel_id]: {
+									...channelCache,
+									threads: {
+										...channelCache.threads,
+										[message.parent_id]: threadMessages.map((m) =>
+											m.id === message.id ? message : m,
+										),
+									},
+								},
+							};
+						}
+
+						// Update main view messages
+						return {
+							...prev,
+							[message.channel_id]: {
+								...channelCache,
+								mainView: channelCache.mainView.map((m) =>
+									m.id === message.id ? message : m,
+								),
+							},
+						};
+					});
 				},
 			)
 			.subscribe();

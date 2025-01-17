@@ -60,7 +60,9 @@ export function ChannelPrefetcher({
 						file_type,
 						file_name,
 						file_size,
-						file_url
+						file_url,
+						caption,
+						description
 					)`,
 				)
 				.eq("channel_id", channelId)

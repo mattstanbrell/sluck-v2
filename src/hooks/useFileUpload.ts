@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { createClient } from "@/utils/supabase/client";
+import { attachFileToMessage } from "@/app/actions/files";
 
 interface UploadOptions {
 	maxSizeMB?: number;
@@ -85,16 +86,14 @@ export const useFileUpload = (options: UploadOptions = {}) => {
 				throw new Error("Failed to upload file");
 			}
 
-			// Create file record in database
-			const { error: dbError } = await supabase.from("files").insert({
-				message_id: messageId,
-				file_name: file.name,
-				file_type: file.type,
-				file_size: file.size,
-				file_url: key,
-			});
-
-			if (dbError) throw dbError;
+			// Create file record in database using server action
+			const fileRecord = await attachFileToMessage(
+				messageId,
+				key,
+				file.name,
+				file.type,
+				file.size,
+			);
 
 			// Update progress to done
 			setUploadProgress((prev) => ({

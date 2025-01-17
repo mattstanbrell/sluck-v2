@@ -15,6 +15,14 @@ interface FileAttachmentProps {
 }
 
 export function FileAttachment({ file }: FileAttachmentProps) {
+	console.log("[FileAttachment] Rendering file:", {
+		id: file.id,
+		name: file.file_name,
+		type: file.file_type,
+		caption: file.caption,
+		url: file.file_url,
+	});
+
 	const [isImageLoading, setIsImageLoading] = useState(true);
 	const { url, error, isLoading, getUrl } = useFileUrl(file.file_url);
 	const mediaErrorRef = useRef<boolean>(false);
@@ -86,7 +94,7 @@ export function FileAttachment({ file }: FileAttachmentProps) {
 					{url ? (
 						<Image
 							src={url}
-							alt={file.file_name || ""}
+							alt={file.caption || file.file_name || ""}
 							width={800}
 							height={600}
 							className={`rounded-md max-h-96 object-contain transition-opacity duration-200 ${
@@ -102,10 +110,17 @@ export function FileAttachment({ file }: FileAttachmentProps) {
 						</div>
 					)}
 				</div>
-				<div className="flex items-center gap-1 mt-1 text-xs text-custom-text-secondary">
-					<FileImage className="w-3 h-3" />
-					<span>{file.file_name}</span>
-					<span>({formatFileSize(file.file_size)})</span>
+				<div className="flex flex-col gap-1 mt-1">
+					<div className="flex items-center gap-1 text-xs text-custom-text-secondary">
+						<FileImage className="w-3 h-3" />
+						<span>{file.file_name}</span>
+						<span>({formatFileSize(file.file_size)})</span>
+					</div>
+					{file.caption && (
+						<div className="text-sm text-custom-text-secondary italic">
+							{file.caption}
+						</div>
+					)}
 				</div>
 			</div>
 		);

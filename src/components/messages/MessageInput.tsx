@@ -168,7 +168,7 @@ export function MessageInput({
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
-		if (!content.trim() || isSubmitting) return;
+		if ((!content.trim() && pendingFiles.length === 0) || isSubmitting) return;
 
 		setIsSubmitting(true);
 		setError(null);
@@ -284,7 +284,7 @@ export function MessageInput({
 			};
 
 			// Create the message in the database
-			const { error } = await createMessage({
+			const message = await createMessage({
 				content: contentToSend,
 				channelId,
 				conversationId,
@@ -292,9 +292,20 @@ export function MessageInput({
 				messageContext,
 			});
 
-			if (error) {
-				console.error("[MessageInput] Failed to create message:", error);
-				throw error;
+			// Upload any pending files
+			if (pendingFiles.length > 0) {
+				console.log("[MessageInput] Uploading files...");
+				for (const file of pendingFiles) {
+					try {
+						await uploadFile(file, message.id);
+					} catch (error) {
+						console.error("[MessageInput] Failed to upload file:", error);
+						setError(
+							error instanceof Error ? error.message : "Failed to upload file",
+						);
+					}
+				}
+				setPendingFiles([]);
 			}
 		} catch (error) {
 			console.error("[MessageInput] Error sending message:", error);

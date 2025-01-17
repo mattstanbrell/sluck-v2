@@ -2,7 +2,11 @@ import type { Database } from "@/lib/database.types";
 import type { ProfileDisplay } from "./profile";
 
 // Base type that matches the database schema
-export type DatabaseFile = Database["public"]["Tables"]["files"]["Row"];
+export type DatabaseFile = Database["public"]["Tables"]["files"]["Row"] & {
+	caption?: string | null;
+	description?: string | null;
+	embedding?: number[] | null;
+};
 
 // Type for file with associated message and profile info
 export interface FileWithMessage {
