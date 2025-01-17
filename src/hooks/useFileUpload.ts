@@ -20,9 +20,18 @@ export const useFileUpload = (options: UploadOptions = {}) => {
 	const supabase = createClient();
 
 	const validateFile = (file: File) => {
-		if (options.maxSizeMB && file.size > options.maxSizeMB * 1024 * 1024) {
+		// Special handling for audio files
+		if (file.type.startsWith("audio/")) {
+			if (file.size > 20 * 1024 * 1024) {
+				throw new Error("Audio files must be less than 20MB");
+			}
+		} else if (
+			options.maxSizeMB &&
+			file.size > options.maxSizeMB * 1024 * 1024
+		) {
 			throw new Error(`File size must be less than ${options.maxSizeMB}MB`);
 		}
+
 		if (options.allowedTypes && options.allowedTypes.length > 0) {
 			const isAllowed = options.allowedTypes.some((pattern) => {
 				// Handle wildcards like "image/*"
