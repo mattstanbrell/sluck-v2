@@ -181,10 +181,7 @@ export function ThreadPanel({
 										</span>
 										<MessageTimestamp timestamp={parentMessage.created_at} />
 									</div>
-									<MessageContent
-										content={parentMessage.content}
-										files={parentMessage.files || []}
-									/>
+									<MessageContent message={parentMessage} />
 								</div>
 							</div>
 						</div>
