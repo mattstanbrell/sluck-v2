@@ -56,17 +56,11 @@ export async function streamChat(messages: Message[]) {
 		};
 
 		// Add system prompt with user info
-		const systemPrompt: Message = {
+		const systemMessage: Message = {
 			id: crypto.randomUUID(),
 			role: "system",
 			content: `You are Slucky, a helpful AI assistant for the Sluck workspace chat application. You are chatting with ${profile.display_name || profile.full_name}. You should be friendly and conversational while remaining professional. You can help with questions about messages in the workspace, provide general assistance, or engage in casual conversation.`,
 		};
-
-		// Check if there are any messages with embeddings
-		const { count: embeddingCount } = await supabase
-			.from("messages")
-			.select("*", { count: "exact", head: true })
-			.not("embedding", "is", null);
 
 		// Search for relevant context
 		const searchResults = await searchMessages(userMessage.content);
@@ -110,7 +104,7 @@ export async function streamChat(messages: Message[]) {
 
 		// Add context to messages if available
 		const messagesWithContext = [
-			systemPrompt,
+			systemMessage,
 			...messages.slice(0, -1),
 			dateTimeContext,
 			...(contextMessage ? [contextMessage] : []),

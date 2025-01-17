@@ -38,9 +38,9 @@ export function ThreadRepliesIndicator({
 	return (
 		<button
 			type="button"
-			className="flex items-center gap-1.5 hover:text-custom-text text-custom-text-tertiary mt-1 ml-3.5 w-fit text-xs transition-colors"
 			onClick={onClick}
 			onKeyDown={handleKeyDown}
+			className={`group flex items-center gap-2 rounded-md px-2 py-1 ${textColorClass}`}
 			tabIndex={0}
 		>
 			<ListEnd className="h-4 w-4 -scale-x-100" />

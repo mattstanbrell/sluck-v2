@@ -1,12 +1,5 @@
 import { createClient } from "@/utils/supabase/server";
-import type { Database } from "@/lib/database.types";
-import type { MessageChainContext } from "@/types/message";
 import OpenAI from "openai";
-
-/**
- * "messages" table row from your DB
- */
-type DatabaseMessage = Database["public"]["Tables"]["messages"]["Row"];
 
 /**
  * Minimal interface for a user profile
@@ -17,13 +10,11 @@ type ProfileResponse = {
 	display_name?: string | null;
 };
 
-/**
- * One hour in milliseconds, used to filter chain messages
- */
+// Export the one hour constant used in other files
 export const ONE_HOUR_MS = 60 * 60 * 1000;
 
 /**
- * formatTimestamp - neatly formats a Date for logs or user-facing text
+ * Format a timestamp for display
  */
 export function formatTimestamp(date: Date, includeDate = true): string {
 	if (includeDate) {
@@ -52,6 +43,10 @@ export async function getFormattedMessageHistory(
 	channelId: string | null,
 	conversationId: string | null,
 ): Promise<string> {
+	console.log(
+		`[getFormattedMessageHistory] Starting for ${channelId ? "channel" : "conversation"} ID: ${channelId || conversationId}`,
+	);
+
 	const supabase = await createClient();
 	const { data: messages, error } = await supabase
 		.from("messages")
@@ -88,8 +83,11 @@ export async function getFormattedMessageHistory(
 		return "";
 	}
 	if (!messages || !messages.length) {
+		console.log("[getFormattedMessageHistory] No messages found");
 		return "";
 	}
+
+	console.log(`[getFormattedMessageHistory] Found ${messages.length} messages`);
 
 	// Determine channel name or DM recipient
 	let heading = "";
@@ -120,7 +118,7 @@ export async function getFormattedMessageHistory(
 			.neq("user_id", firstMsgUserId)
 			.single();
 
-		const p = participant?.profile as ProfileResponse;
+		const p = participant?.profile as unknown as ProfileResponse;
 		const recipientName = p?.display_name || p?.full_name || "Unknown User";
 		heading = `Direct Message Recipient: ${recipientName}`;
 	}
@@ -131,7 +129,7 @@ export async function getFormattedMessageHistory(
 	let currentDate: string | null = null;
 
 	for (const msg of messages) {
-		const sender = msg.profile as ProfileResponse;
+		const sender = msg.profile as unknown as ProfileResponse;
 		const senderName =
 			sender?.display_name || sender?.full_name || "Unknown User";
 
@@ -178,7 +176,9 @@ export async function getFormattedMessageHistory(
 		}
 	}
 
-	return lines.join("\n");
+	const formattedHistory = lines.join("\n");
+	console.log("[Message History]:\n", formattedHistory);
+	return formattedHistory;
 }
 
 /**
@@ -193,6 +193,13 @@ export async function getContextualInformation(
 	completeHistory: string,
 	chunk: string,
 ): Promise<string> {
+	console.log("[getContextualInformation] Starting context generation");
+	console.log(
+		"[getContextualInformation] Complete history length:",
+		completeHistory.length,
+	);
+	console.log("[getContextualInformation] Chunk length:", chunk.length);
+
 	const prompt = `
 <conversation>
 ${completeHistory}
@@ -225,6 +232,7 @@ Return only the context, no extraneous text.
 		});
 
 		const context = response.choices[0].message?.content?.trim() || "";
+		console.log("[Contextual Information]:\n", context);
 		return context;
 	} catch (error) {
 		console.error("[getContextualInformation] Error:", error);

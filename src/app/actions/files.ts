@@ -2,40 +2,23 @@
 
 import { createClient } from "@/utils/supabase/server";
 import type { DatabaseFile } from "@/types/message";
-import type { ProfileResponse } from "@/types/profile";
-import { S3Client } from "@aws-sdk/client-s3";
 import { processImageFile } from "./images";
 import { processAudioFile } from "./audio";
 import { processVideoFile } from "./video";
 
-// Type for message response with single profile
-interface MessageResponse {
+interface DatabaseMessageResponse {
 	channel_id: string | null;
 	conversation_id: string | null;
-	profile: ProfileResponse;
+	profile: {
+		id: string;
+		display_name: string | null;
+		full_name: string | null;
+	};
 	channels?: {
 		id: string;
 		name: string;
-	}[];
+	};
 }
-
-// Validate required AWS environment variables
-const region = process.env.AWS_S3_REGION;
-const accessKeyId = process.env.AWS_S3_ACCESS_KEY_ID;
-const secretAccessKey = process.env.AWS_S3_SECRET_ACCESS_KEY;
-const bucketName = process.env.AWS_S3_BUCKET_NAME;
-
-if (!region || !accessKeyId || !secretAccessKey || !bucketName) {
-	throw new Error("Missing required AWS configuration");
-}
-
-const s3Client = new S3Client({
-	region,
-	credentials: {
-		accessKeyId,
-		secretAccessKey,
-	},
-});
 
 export async function attachFileToMessage(
 	messageId: string,
@@ -67,35 +50,39 @@ export async function attachFileToMessage(
 	}
 
 	// Get message details to format the description
-	const { data: message } = await supabase
+	const { data: message, error } = await supabase
 		.from("messages")
 		.select(`
 			channel_id,
 			conversation_id,
-			profile:profiles!user_id (
-				id,
-				display_name,
-				full_name
-			),
-			channels!channel_id (
-				id,
-				name
-			)
+			profile:profiles(id, display_name, full_name),
+			channels(id, name)
 		`)
 		.eq("id", messageId)
 		.single();
 
-	if (!message) {
+	if (error || !message) {
 		throw new Error("Message not found");
 	}
 
-	const typedMessage = message as MessageResponse;
+	const typedMessage = message as unknown as DatabaseMessageResponse;
+	console.log("[attachFileToMessage] Typed message:", typedMessage);
+	// 	[attachFileToMessage] Typed message: {
+	//   channel_id: 'a027d5ff-eb58-410b-baf6-6eb30888e531',
+	//   conversation_id: null,
+	//   profile: {
+	//     id: '74be0c05-798f-4ed3-b7a5-9e02d5b52420',
+	//     full_name: 'Matt Stanbrell',
+	//     display_name: 'Matt Stanbrell'
+	//   },
+	//   channels: { id: 'a027d5ff-eb58-410b-baf6-6eb30888e531', name: 'another-test' }
+	// }
 	const senderName =
 		typedMessage.profile?.display_name ||
 		typedMessage.profile?.full_name ||
 		"Unknown User";
-	const channelInfo = message.channels?.[0]?.name
-		? `${message.channels[0].name} channel`
+	const channelInfo = typedMessage.channels?.name
+		? `${typedMessage.channels.name} channel`
 		: "a direct message";
 	const timestamp = new Date().toLocaleDateString("en-GB", {
 		weekday: "long",

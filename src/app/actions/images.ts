@@ -5,7 +5,6 @@ import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createClient } from "@/utils/supabase/server";
 import { generateEmbeddings } from "@/utils/embeddings";
-import type { DatabaseFile } from "@/types/message";
 
 if (!process.env.GOOGLE_API_KEY) {
 	throw new Error("Missing GOOGLE_API_KEY");
@@ -90,7 +89,7 @@ export async function generateImageCaptionAndDescription(
 					mimeType,
 				},
 			},
-			"Describe this image in a way that would be useful for semantic search. Be concise (under 50 words) and focus on what people might search for. Include key objects, actions, colors, and notable details. Do not include technical analysis or compositional details.",
+			"Describe this image in a way that would be useful for semantic search. Be concise (under 50 words) and focus on what people might search for. Include key objects, actions, colors, and notable details. Do not include technical analysis or compositional details. Do not include any other text.",
 		]);
 		const description = descriptionResult.response.text().trim();
 		console.log(
@@ -153,22 +152,19 @@ export async function processImageFile(
 			throw captionUpdateError;
 		}
 
-		// Format the description for search
-		const formattedDescription = `${senderName} shared ${fileName} ${channelInfo} on ${timestamp}. Image description: ${description}`;
+		// Format the full text for embedding (including metadata)
+		const textForEmbedding = `[${senderName} shared '${fileName}' in ${channelInfo} on ${timestamp}. Image description: ${description}]`;
 
-		// Generate embedding from the formatted description
-		const embeddings = await generateEmbeddings(
-			[formattedDescription],
-			"document",
-		);
+		// Generate embedding from the formatted text
+		const embeddings = await generateEmbeddings([textForEmbedding], "document");
 		const embedding = embeddings[0];
 
-		// Update the file record with the description and embedding
+		// Update the file record with just the raw description and embedding
 		console.log(
 			"[processImageFile] Updating file with description and embedding:",
 			{
 				fileId,
-				hasDescription: !!formattedDescription,
+				hasDescription: !!description,
 				hasEmbedding: !!embedding,
 			},
 		);
@@ -176,7 +172,7 @@ export async function processImageFile(
 		const { data: updated, error: updateError } = await supabase
 			.from("files")
 			.update({
-				description: formattedDescription,
+				description,
 				embedding,
 			})
 			.eq("id", fileId)
@@ -189,7 +185,7 @@ export async function processImageFile(
 				{
 					error: updateError,
 					fileId,
-					descriptionLength: formattedDescription.length,
+					descriptionLength: description.length,
 				},
 			);
 			throw updateError;

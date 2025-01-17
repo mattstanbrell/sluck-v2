@@ -1,16 +1,9 @@
-import ReactMarkdown from "react-markdown";
-import type { Components } from "react-markdown";
 import { FileAttachment } from "./FileAttachment";
-import type { DatabaseFile } from "@/types/file";
 import type { Message } from "@/types/message";
 
 interface MessageContentProps {
 	message: Message;
 }
-
-const components: Components = {
-	p: ({ children }) => <p className="whitespace-pre-wrap">{children}</p>,
-};
 
 export function MessageContent({ message }: MessageContentProps) {
 	return (

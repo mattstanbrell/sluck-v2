@@ -1,8 +1,5 @@
 import { createClient } from "@/utils/supabase/server";
 import { generateEmbeddings } from "@/utils/embeddings";
-import type { Database } from "@/lib/database.types";
-
-const ONE_HOUR_MS = 60 * 60 * 1000;
 
 type MatchResult = {
 	id: string;
@@ -15,135 +12,10 @@ type MatchResult = {
 	similarity: number;
 };
 
-type DatabaseMessage = Database["public"]["Tables"]["messages"]["Row"];
-
-interface RawDatabaseMessage {
-	id: string;
-	content: string;
-	context: string | null;
-	channel_id: string | null;
-	conversation_id: string | null;
-	user_id: string;
-	created_at: string;
-	parent_id: string | null;
-	embedding: number[] | null;
-	formatted_chain: string | null;
-	profiles:
-		| {
-				id: string;
-				full_name: string;
-				display_name: string | null;
-		  }[]
-		| null;
-	channels:
-		| {
-				id: string;
-				name: string;
-		  }[]
-		| null;
-}
-
-type MessageWithProfile = DatabaseMessage & {
-	profiles: {
-		id: string;
-		full_name: string;
-		display_name: string | null;
-	} | null;
-	channels: {
-		id: string;
-		name: string;
-	} | null;
-	chain_messages?: ChainMessage[];
-};
-
 interface ChainMessage {
 	id: string;
 	content: string;
 	created_at: string;
-}
-
-interface RawSearchResult {
-	id: string;
-	content: string;
-	created_at: string;
-	channel_id: string | null;
-	conversation_id: string | null;
-	user_id: string;
-	parent_id: string | null;
-	context: string | null;
-	embedding: number[] | null;
-	formatted_chain: string | null;
-	similarity: number;
-	profile?: {
-		id: string;
-		display_name: string | null;
-		full_name: string;
-	} | null;
-	channel?: {
-		id: string;
-		name: string;
-	} | null;
-	chain_messages?: ChainMessage[];
-}
-
-interface DatabaseSearchResult {
-	id: string;
-	content: string;
-	created_at: string;
-	channel_id: string | null;
-	conversation_id: string | null;
-	user_id: string;
-	parent_id: string | null;
-	context: string | null;
-	embedding: number[] | null;
-	formatted_chain: string | null;
-	similarity: number;
-	chain_messages: {
-		id: string;
-		content: string;
-		created_at: string;
-	}[];
-	profile: {
-		id: string;
-		display_name: string | null;
-		full_name: string;
-	} | null;
-	channel: {
-		id: string;
-		name: string;
-	} | null;
-}
-
-interface RawDatabaseResult {
-	id: string;
-	content: string;
-	created_at: string;
-	channel_id: string | null;
-	conversation_id: string | null;
-	user_id: string;
-	parent_id: string | null;
-	context: string | null;
-	embedding: number[] | null;
-	formatted_chain: string | null;
-	similarity: number;
-	chain_messages?: {
-		id: string;
-		content: string;
-		created_at: string;
-	}[];
-	profile?:
-		| {
-				id: string;
-				display_name: string | null;
-				full_name: string;
-		  }[]
-		| null;
-	channel?:
-		| {
-				id: string;
-				name: string;
-		  }[]
-		| null;
 }
 
 export interface SearchResult {

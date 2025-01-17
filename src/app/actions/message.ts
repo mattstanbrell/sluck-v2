@@ -2,7 +2,7 @@
 
 import { createClient } from "@/utils/supabase/server";
 import type { Database } from "@/lib/database.types";
-import type { MessageChainContext } from "@/types/message";
+/* import type { MessageChainContext } from "@/types/message"; */
 
 import { insertMessage, canUserPostInChannel } from "@/app/actions/messageData";
 import { embedLatestChainMessage } from "@/app/actions/messageEmbeddings";
@@ -18,13 +18,13 @@ export async function createMessage({
 	channelId,
 	conversationId,
 	parentId,
-	messageContext,
+	/* messageContext */
 }: {
 	content: string;
 	channelId?: string;
 	conversationId?: string;
 	parentId?: string;
-	messageContext: MessageChainContext;
+	/* messageContext: MessageChainContext */
 }): Promise<DatabaseMessage> {
 	const supabase = await createClient();
 
@@ -51,7 +51,7 @@ export async function createMessage({
 	setTimeout(
 		async () => {
 			try {
-				await embedLatestChainMessage(message.id, messageContext);
+				await embedLatestChainMessage(message.id);
 			} catch (err) {
 				console.error("[createMessage] Embedding error:", err);
 			}

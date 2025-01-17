@@ -24,7 +24,6 @@ import {
 	PopoverTrigger,
 } from "@/components/ui/popover";
 import { createMessage } from "@/app/actions/message";
-import type { MessageChainContext } from "@/types/message";
 
 // Add a helper function to generate a unique key for files
 const generateFileKey = (file: File, index: number) => {
@@ -202,6 +201,7 @@ export function MessageInput({
 			const contentToSend = content.trim();
 			setContent("");
 
+			/* Commenting out unused message context construction
 			// Get message context in background
 			console.log("[MessageInput] Getting latest message...");
 			const { data: latestMessage } = await supabase
@@ -282,6 +282,7 @@ export function MessageInput({
 						]
 					: [],
 			};
+			*/
 
 			// Create the message in the database
 			const message = await createMessage({
@@ -289,7 +290,6 @@ export function MessageInput({
 				channelId,
 				conversationId,
 				parentId,
-				messageContext,
 			});
 
 			// Upload any pending files

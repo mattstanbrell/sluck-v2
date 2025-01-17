@@ -207,22 +207,19 @@ export async function processAudioFile(
 			fileName,
 		);
 
-		// Format the description for search
-		const formattedDescription = `[${senderName} shared '${fileName}' in ${channelInfo} on ${timestamp}. Audio description: ${description}]`;
+		// Format the full text for embedding (including metadata)
+		const textForEmbedding = `[${senderName} shared '${fileName}' in ${channelInfo} on ${timestamp}. Audio description: ${description}]`;
 
-		// Generate embedding from the formatted description
-		const embeddings = await generateEmbeddings(
-			[formattedDescription],
-			"document",
-		);
+		// Generate embedding from the formatted text
+		const embeddings = await generateEmbeddings([textForEmbedding], "document");
 		const embedding = embeddings[0];
 
-		// Update the file record with the description and embedding
+		// Update the file record with just the raw description and embedding
 		console.log(
 			"[processAudioFile] Updating file with description and embedding:",
 			{
 				fileId,
-				hasDescription: !!formattedDescription,
+				hasDescription: !!description,
 				hasEmbedding: !!embedding,
 			},
 		);
@@ -230,7 +227,7 @@ export async function processAudioFile(
 		const { data: updated, error: updateError } = await supabase
 			.from("files")
 			.update({
-				description: formattedDescription,
+				description,
 				embedding,
 			})
 			.eq("id", fileId)
@@ -243,7 +240,7 @@ export async function processAudioFile(
 				{
 					error: updateError,
 					fileId,
-					descriptionLength: formattedDescription.length,
+					descriptionLength: description.length,
 				},
 			);
 			throw updateError;

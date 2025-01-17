@@ -96,7 +96,7 @@ async function processVideoWithGemini(
 		console.log("[processVideoWithGemini] Generating caption...");
 		const captionResult = await model.generateContent([
 			{
-				text: `Generate a single short sentence summarizing what this video shows. Be direct and factual. This will be displayed under the video as a quick preview. Include no other text in your response.`,
+				text: "Generate a single short sentence summarizing what this video shows. Be direct and factual. This will be displayed under the video as a quick preview. Include no other text in your response.",
 			},
 			{
 				fileData: {
@@ -128,7 +128,7 @@ async function processVideoWithGemini(
 		console.log("[processVideoWithGemini] Generating detailed description...");
 		const descriptionResult = await model.generateContent([
 			{
-				text: `Provide a detailed description of this video in 2-3 paragraphs. Focus on the key events, visual content, and any dialogue or text shown. Be specific but concise. Include no other text in your response.`,
+				text: "Provide a detailed description of this video in 2-3 paragraphs. Focus on the key events, visual content, and any dialogue or text shown. Be specific but concise. Include no other text in your response.",
 			},
 			{
 				fileData: {
@@ -185,26 +185,26 @@ export async function processVideoFile(
 		});
 
 		// Process video and get description
-		const { description, fileUri, mimeType } = await processVideoWithGemini(
+		const { description } = await processVideoWithGemini(
 			downloadURL,
 			fileName,
 			fileId,
 			supabaseClient,
 		);
 
-		// Format the content for search
-		const formattedContent = `[${senderName} shared '${fileName}' in ${channelInfo} on ${timestamp}. Video content: ${description}]`;
+		// Format the full text for embedding (including metadata)
+		const textForEmbedding = `[${senderName} shared '${fileName}' in ${channelInfo} on ${timestamp}. Video content: ${description}]`;
 
-		// Generate embedding from the formatted content
-		const embeddings = await generateEmbeddings([formattedContent], "document");
+		// Generate embedding from the formatted text
+		const embeddings = await generateEmbeddings([textForEmbedding], "document");
 		const embedding = embeddings[0];
 
-		// Update the file record with the description and embedding
+		// Update the file record with just the raw description and embedding
 		console.log(
 			"[processVideoFile] Updating file with description and embedding:",
 			{
 				fileId,
-				hasDescription: !!formattedContent,
+				hasDescription: !!description,
 				hasEmbedding: !!embedding,
 			},
 		);
@@ -212,7 +212,7 @@ export async function processVideoFile(
 		const { data: updated, error: updateError } = await supabaseClient
 			.from("files")
 			.update({
-				description: formattedContent,
+				description,
 				embedding,
 			})
 			.eq("id", fileId)
@@ -238,7 +238,7 @@ export async function processVideoFile(
 
 		// Clean up the Gemini file now that we're done with it
 		try {
-			const fileNameParts = fileUri.split("/");
+			const fileNameParts = downloadURL.split("/");
 			const geminiFileName = fileNameParts[fileNameParts.length - 1];
 			await fileManager.deleteFile(geminiFileName);
 			console.log("[processVideoFile] Cleaned up Gemini file");

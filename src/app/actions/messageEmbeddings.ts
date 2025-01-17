@@ -6,7 +6,6 @@ import {
 	getFormattedMessageHistory,
 	getContextualInformation,
 } from "@/utils/messageUtils";
-import type { MessageChainContext } from "@/types/message";
 
 /**
  * For simplicity, define minimal types for the DB rows we fetch.
@@ -47,7 +46,6 @@ interface MessageWithProfile {
  */
 export async function embedLatestChainMessage(
 	messageId: string,
-	messageContext: MessageChainContext,
 ): Promise<void> {
 	const supabaseClient = await createClient();
 
@@ -59,8 +57,8 @@ export async function embedLatestChainMessage(
       *,
       profile:profiles!user_id (
         id,
-        full_name,
-        display_name
+        display_name,
+        full_name
       ),
       files (
         id,
@@ -74,31 +72,23 @@ export async function embedLatestChainMessage(
 		.single();
 
 	if (originalError || !originalMessage) {
-		console.error(
-			"[embedLatestChainMessage] Failed to get new message:",
-			originalError,
-		);
+		console.error("Error fetching original message:", originalError);
 		return;
 	}
+
+	// Type the message and extract profile info
+	const typedMessage = originalMessage as unknown as MessageWithProfile;
 
 	// 2) Fetch chain messages (all messages from same channel or convo, same user)
 	const { data: chainMessages, error: chainError } = await supabaseClient
 		.from("messages")
 		.select(
 			`
-      id,
-      content,
-      created_at,
-      channel_id,
-      conversation_id,
-      user_id,
-      parent_id,
-      context,
-      embedding,
+      *,
       profile:profiles!user_id (
         id,
-        full_name,
-        display_name
+        display_name,
+        full_name
       ),
       files (
         id,
@@ -108,18 +98,15 @@ export async function embedLatestChainMessage(
       )
     `,
 		)
+		.eq("user_id", typedMessage.user_id)
 		.eq(
-			originalMessage.channel_id ? "channel_id" : "conversation_id",
-			originalMessage.channel_id || originalMessage.conversation_id,
+			typedMessage.channel_id ? "channel_id" : "conversation_id",
+			typedMessage.channel_id || typedMessage.conversation_id,
 		)
-		.eq("user_id", originalMessage.user_id)
 		.order("created_at", { ascending: false });
 
 	if (chainError) {
-		console.error(
-			"[embedLatestChainMessage] Failed to get chain messages:",
-			chainError,
-		);
+		console.error("Error fetching chain messages:", chainError);
 		return;
 	}
 
@@ -135,37 +122,32 @@ export async function embedLatestChainMessage(
 	});
 
 	// The newest message in that filtered chain (should be originalMessage)
-	const latestMessage = filteredChain[0];
+	const latestMessage = filteredChain[0] as unknown as MessageWithProfile;
 	if (!latestMessage) return;
 
-	// 3) Attempt to get channel or DM info
-	let channelName: string | null = null;
-	let recipientName: string | null = null;
-
+	// 3) Attempt to get channel or DM info - we don't use these variables but they might be useful later
 	if (latestMessage.channel_id) {
-		const { data: channel } = await supabaseClient
+		/* const { data: _channel } = */ await supabaseClient
 			.from("channels")
 			.select("name")
 			.eq("id", latestMessage.channel_id)
 			.single();
-		channelName = channel?.name || null;
 	} else if (latestMessage.conversation_id) {
 		// DM scenario, fetch the other participant's profile
-		const { data: partData } = await supabaseClient
+		/* const { data: _partData } = */ await supabaseClient
 			.from("conversation_participants")
-			.select(`
+			.select(
+				`
         profile:profiles!user_id (
           id,
           display_name,
           full_name
         )
-      `)
+      `,
+			)
 			.eq("conversation_id", latestMessage.conversation_id)
 			.neq("user_id", latestMessage.user_id)
 			.single();
-
-		const rec = partData?.profile as ProfileResponse;
-		recipientName = rec?.display_name || rec?.full_name || null;
 	}
 
 	// 4) Build the chunk from the filtered chain
@@ -173,7 +155,8 @@ export async function embedLatestChainMessage(
 	const promptChunkLines: string[] = [];
 
 	for (const msg of filteredChain) {
-		const senderProfile = msg.profile as ProfileResponse;
+		const typedMsg = msg as unknown as MessageWithProfile;
+		const senderProfile = typedMsg.profile;
 		const senderName =
 			senderProfile?.display_name || senderProfile?.full_name || "Unknown User";
 
@@ -181,29 +164,29 @@ export async function embedLatestChainMessage(
 		const msgTimestamp = new Date(msg.created_at);
 		const lineTimestamp = `[${senderName}, ${formatTimestamp(msgTimestamp, false)}]`;
 		chunkLines.push(`${lineTimestamp}: ${msg.content}`);
+
+		// For prompt chunk
 		promptChunkLines.push(`${lineTimestamp}: ${msg.content}`);
 
-		// If there are files, incorporate them
-		if (msg.files?.length) {
-			for (const file of msg.files) {
+		// Add file descriptions if present
+		if (typedMsg.files?.length) {
+			for (const file of typedMsg.files) {
+				const rawDescription = file.description || "";
+				if (file.file_type.startsWith("image/")) {
+					promptChunkLines.push(
+						`[Image: "${file.file_name}"] [Description: ${rawDescription}]`,
+					);
+				} else if (file.file_type.startsWith("audio/")) {
+					promptChunkLines.push(
+						`[Audio: "${file.file_name}"] [Description: ${rawDescription}]`,
+					);
+				} else if (file.file_type.startsWith("video/")) {
+					promptChunkLines.push(
+						`[Video: "${file.file_name}"] [Description: ${rawDescription}]`,
+					);
+				}
+				// Also add descriptions to chunk
 				if (file.description) {
-					const rawDescription = file.description
-						.replace(/^\[.*?\. (Image|Audio|Video) description: /, "")
-						.replace(/\]$/, "");
-					if (file.file_type.startsWith("image/")) {
-						promptChunkLines.push(
-							`[Image: "${file.file_name}"] [Description: ${rawDescription}]`,
-						);
-					} else if (file.file_type.startsWith("audio/")) {
-						promptChunkLines.push(
-							`[Audio: "${file.file_name}"] [Description: ${rawDescription}]`,
-						);
-					} else if (file.file_type.startsWith("video/")) {
-						promptChunkLines.push(
-							`[Video: "${file.file_name}"] [Description: ${rawDescription}]`,
-						);
-					}
-					// Also add descriptions to chunk
 					chunkLines.push(file.description);
 				}
 			}
@@ -244,10 +227,7 @@ export async function embedLatestChainMessage(
 			.eq("id", latestMessage.id);
 
 		if (updateError) {
-			console.error(
-				"[embedLatestChainMessage] Failed to update message with embedding:",
-				updateError,
-			);
+			console.error("Error updating message with embedding:", updateError);
 			return;
 		}
 
@@ -265,10 +245,7 @@ export async function embedLatestChainMessage(
 				.in("id", olderMessageIds);
 
 			if (clearError) {
-				console.error(
-					"[embedLatestChainMessage] Failed to clear older embeddings:",
-					clearError,
-				);
+				console.error("Error clearing older embeddings:", clearError);
 			}
 		}
 	}

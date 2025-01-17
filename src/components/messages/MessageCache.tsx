@@ -8,7 +8,7 @@ import {
 	useCallback,
 } from "react";
 import { createClient } from "@/utils/supabase/client";
-import type { Message, MessageStatus } from "@/types/message";
+import type { Message } from "@/types/message";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
 interface MessageCache {

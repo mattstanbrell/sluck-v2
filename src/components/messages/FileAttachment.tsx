@@ -1,13 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import {
-	FileText,
-	FileVideo,
-	FileAudio,
-	FileImage,
-	RefreshCw,
-	ChevronDown,
-	ChevronUp,
-} from "lucide-react";
+import { FileText, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
 import { useFileUrl } from "@/hooks/useFileUrl";
 import Image from "next/image";
 import type { DatabaseFile } from "@/types/file";
@@ -40,13 +32,6 @@ export function FileAttachment({ file }: FileAttachmentProps) {
 			getUrl();
 		}
 	}, [file.file_type, getUrl]);
-
-	// Helper to format file size
-	const formatFileSize = (bytes: number) => {
-		if (bytes < 1024) return `${bytes} B`;
-		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-	};
 
 	// Get file type category
 	const isImage = file.file_type.startsWith("image/");

@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { createClient } from "@/utils/supabase/client";
 import { attachFileToMessage } from "@/app/actions/files";
 
 interface UploadOptions {
@@ -17,7 +16,6 @@ export const useFileUpload = (options: UploadOptions = {}) => {
 	const [uploadProgress, setUploadProgress] = useState<
 		Record<string, UploadProgress>
 	>({});
-	const supabase = createClient();
 
 	const validateFile = (file: File) => {
 		// Special handling for audio files
@@ -96,7 +94,7 @@ export const useFileUpload = (options: UploadOptions = {}) => {
 			}
 
 			// Create file record in database using server action
-			const fileRecord = await attachFileToMessage(
+			await attachFileToMessage(
 				messageId,
 				key,
 				file.name,
