@@ -5,6 +5,8 @@ import {
 	FileAudio,
 	FileImage,
 	RefreshCw,
+	ChevronDown,
+	ChevronUp,
 } from "lucide-react";
 import { useFileUrl } from "@/hooks/useFileUrl";
 import Image from "next/image";
@@ -24,6 +26,7 @@ export function FileAttachment({ file }: FileAttachmentProps) {
 	});
 
 	const [isImageLoading, setIsImageLoading] = useState(true);
+	const [showDescription, setShowDescription] = useState(false);
 	const { url, error, isLoading, getUrl } = useFileUrl(file.file_url);
 	const mediaErrorRef = useRef<boolean>(false);
 
@@ -94,7 +97,14 @@ export function FileAttachment({ file }: FileAttachmentProps) {
 					{url ? (
 						<Image
 							src={url}
-							alt={file.caption || file.file_name || ""}
+							alt={
+								file.description
+									?.replace(/^\[.*?\. Image description: /, "")
+									.replace(/\]$/, "") ||
+								file.caption ||
+								file.file_name ||
+								""
+							}
 							width={800}
 							height={600}
 							className={`rounded-md max-h-96 object-contain transition-opacity duration-200 ${
@@ -110,15 +120,38 @@ export function FileAttachment({ file }: FileAttachmentProps) {
 						</div>
 					)}
 				</div>
-				<div className="flex flex-col gap-1 mt-1">
-					<div className="flex items-center gap-1 text-xs text-custom-text-secondary">
-						<FileImage className="w-3 h-3" />
-						<span>{file.file_name}</span>
-						<span>({formatFileSize(file.file_size)})</span>
-					</div>
+				<div className="mt-1">
 					{file.caption && (
-						<div className="text-sm text-custom-text-secondary italic">
-							{file.caption}
+						<div className="flex items-start gap-2">
+							<div className="flex-1 text-sm text-custom-text-secondary italic">
+								{file.caption}
+							</div>
+							{file.description && (
+								<button
+									type="button"
+									onClick={() => setShowDescription(!showDescription)}
+									className="flex items-center gap-1 text-xs text-custom-text-secondary hover:text-custom-text transition-colors px-2 py-1 rounded hover:bg-custom-background-secondary"
+									aria-label={
+										showDescription
+											? "Hide full description"
+											: "Show full description"
+									}
+								>
+									{showDescription ? (
+										<ChevronUp className="w-4 h-4" />
+									) : (
+										<ChevronDown className="w-4 h-4" />
+									)}
+									{showDescription ? "Less" : "More"}
+								</button>
+							)}
+						</div>
+					)}
+					{showDescription && file.description && (
+						<div className="mt-2 text-sm text-custom-text-secondary bg-custom-background-secondary p-3 rounded-md">
+							{file.description
+								.replace(/^\[.*?\. Image description: /, "")
+								.replace(/\]$/, "")}
 						</div>
 					)}
 				</div>
@@ -145,10 +178,40 @@ export function FileAttachment({ file }: FileAttachmentProps) {
 							<track kind="captions" />
 							Your browser does not support the video tag.
 						</video>
-						<div className="flex items-center gap-1 mt-1 text-xs text-custom-text-secondary">
-							<FileVideo className="w-3 h-3" />
-							<span>{file.file_name}</span>
-							<span>({formatFileSize(file.file_size)})</span>
+						<div className="mt-1">
+							{file.caption && (
+								<div className="flex items-start gap-2">
+									<div className="flex-1 text-sm text-custom-text-secondary italic">
+										{file.caption}
+									</div>
+									{file.description && (
+										<button
+											type="button"
+											onClick={() => setShowDescription(!showDescription)}
+											className="flex items-center gap-1 text-xs text-custom-text-secondary hover:text-custom-text transition-colors px-2 py-1 rounded hover:bg-custom-background-secondary"
+											aria-label={
+												showDescription
+													? "Hide full description"
+													: "Show full description"
+											}
+										>
+											{showDescription ? (
+												<ChevronUp className="w-4 h-4" />
+											) : (
+												<ChevronDown className="w-4 h-4" />
+											)}
+											{showDescription ? "Less" : "More"}
+										</button>
+									)}
+								</div>
+							)}
+							{showDescription && file.description && (
+								<div className="mt-2 text-sm text-custom-text-secondary bg-custom-background-secondary p-3 rounded-md">
+									{file.description
+										.replace(/^\[.*?\. Video content: /, "")
+										.replace(/\]$/, "")}
+								</div>
+							)}
 						</div>
 					</>
 				)}
@@ -171,10 +234,40 @@ export function FileAttachment({ file }: FileAttachmentProps) {
 							<track kind="captions" />
 							Your browser does not support the audio tag.
 						</audio>
-						<div className="flex items-center gap-1 mt-1 text-xs text-custom-text-secondary">
-							<FileAudio className="w-3 h-3" />
-							<span>{file.file_name}</span>
-							<span>({formatFileSize(file.file_size)})</span>
+						<div className="mt-1">
+							{file.caption && (
+								<div className="flex items-start gap-2">
+									<div className="flex-1 text-sm text-custom-text-secondary italic">
+										{file.caption}
+									</div>
+									{file.description && (
+										<button
+											type="button"
+											onClick={() => setShowDescription(!showDescription)}
+											className="flex items-center gap-1 text-xs text-custom-text-secondary hover:text-custom-text transition-colors px-2 py-1 rounded hover:bg-custom-background-secondary"
+											aria-label={
+												showDescription
+													? "Hide full description"
+													: "Show full description"
+											}
+										>
+											{showDescription ? (
+												<ChevronUp className="w-4 h-4" />
+											) : (
+												<ChevronDown className="w-4 h-4" />
+											)}
+											{showDescription ? "Less" : "More"}
+										</button>
+									)}
+								</div>
+							)}
+							{showDescription && file.description && (
+								<div className="mt-2 text-sm text-custom-text-secondary bg-custom-background-secondary p-3 rounded-md">
+									{file.description
+										.replace(/^\[.*?\. Audio description: /, "")
+										.replace(/\]$/, "")}
+								</div>
+							)}
 						</div>
 					</>
 				)}
@@ -191,12 +284,12 @@ export function FileAttachment({ file }: FileAttachmentProps) {
 			aria-label={`Open ${file.file_name} in new tab`}
 		>
 			<FileText className="w-4 h-4 text-custom-text-secondary" />
-			<div>
+			{/* <div>
 				<span className="text-sm text-custom-text">{file.file_name}</span>
 				<span className="text-xs text-custom-text-secondary ml-2">
 					({formatFileSize(file.file_size)})
 				</span>
-			</div>
+			</div> */}
 		</button>
 	);
 }

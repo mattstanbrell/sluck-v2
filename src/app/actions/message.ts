@@ -31,6 +31,7 @@ type DatabaseProfile = Database["public"]["Tables"]["profiles"]["Row"];
 type DatabaseFile = Database["public"]["Tables"]["files"]["Row"] & {
 	caption?: string | null;
 	description?: string | null;
+	file_type: string;
 };
 
 /**
@@ -41,6 +42,19 @@ type ProfileResponse = Pick<
 	DatabaseProfile,
 	"id" | "full_name" | "display_name"
 >;
+
+/**
+ * MessageResponse: shape of a message response that includes a single profile object
+ */
+interface MessageResponse {
+	channel_id: string | null;
+	conversation_id: string | null;
+	profile: ProfileResponse;
+	channels?: {
+		id: string;
+		name: string;
+	}[];
+}
 
 /**
  * RawMessageResponse: shape of a joined message record from Supabase,
@@ -194,6 +208,7 @@ async function getFormattedMessageHistory(
 				id,
 				message_id,
 				file_name,
+				file_type,
 				caption,
 				description
 			)
@@ -266,8 +281,20 @@ async function getFormattedMessageHistory(
 		// Add file information if present
 		if (msg.files?.length > 0) {
 			for (const file of msg.files) {
-				if (file.caption) {
-					lines.push(`[Image: ${file.file_name}] [Caption: ${file.caption}]`);
+				if (file.description) {
+					if (file.file_type.startsWith("image/")) {
+						lines.push(
+							`[Image: "${file.file_name}"] [Description: ${file.description?.replace(/^\[.*?\. (Image|Audio|Video) description: /, "").replace(/\]$/, "")}]`,
+						);
+					} else if (file.file_type.startsWith("audio/")) {
+						lines.push(
+							`[Audio: "${file.file_name}"] [Description: ${file.description?.replace(/^\[.*?\. (Image|Audio|Video) description: /, "").replace(/\]$/, "")}]`,
+						);
+					} else if (file.file_type.startsWith("video/")) {
+						lines.push(
+							`[Video: "${file.file_name}"] [Description: ${file.description?.replace(/^\[.*?\. (Image|Audio|Video) description: /, "").replace(/\]$/, "")}]`,
+						);
+					}
 				}
 			}
 		}
@@ -297,7 +324,7 @@ async function getContextualInformation(
 	const prompt = `<conversation>
 ${completeHistory}
 
-Note: Messages may include attached images. Image information is shown in the format: [Image: filename] [Caption: image caption]
+Note: Messages may include attached files, including images and audio. File information is shown in the format: [File type: filename] [Description: file description]
 </conversation>
 
 Here is the chunk of chat messages we want to embed for search:
@@ -637,8 +664,8 @@ async function embedLatestChainMessage(
 	if (embeddingContext.chainMessages.length === 0) {
 		const cm = embeddingContext.currentMessage;
 		const channelInfo = cm.channelName
-			? `in ${cm.channelName} channel`
-			: `to ${cm.recipientName}`;
+			? `${cm.channelName} channel`
+			: "a direct message";
 		const timestamp = formatTimestamp(cm.timestamp, true);
 		const messageDate = cm.timestamp;
 		const formattedDate = messageDate.toLocaleDateString("en-GB", {
@@ -661,26 +688,34 @@ async function embedLatestChainMessage(
 
 		// Format for embedding
 		chunkLines.push(
-			`[${cm.sender.displayName} said ${channelInfo} on ${timestamp}]: ${cm.content}`,
+			`[${cm.sender.displayName} said in ${channelInfo} on ${timestamp}]: ${cm.content}`,
 		);
 
-		// Add file captions if present
+		// Add file descriptions if present
 		if (originalMessage.files?.length > 0) {
 			for (const file of originalMessage.files) {
-				if (file.caption) {
-					// Format for the prompt
-					promptChunkLines.push(
-						`[Image: ${file.file_name}] [Caption: ${file.caption}]`,
-					);
-					// Format for embedding
-					const formattedDescription = `${cm.sender.displayName} shared ${file.file_name} in ${channelInfo} on ${timestamp}. Image description: ${file.caption}`;
-					chunkLines.push(formattedDescription);
+				if (file.description) {
+					// Format for the prompt - use raw description
+					const rawDescription =
+						file.description
+							?.replace(/^\[.*?\. (Image|Audio|Video) description: /, "")
+							.replace(/\]$/, "") || "";
+					if (file.file_type.startsWith("image/")) {
+						promptChunkLines.push(
+							`[Image: "${file.file_name}"] [Description: ${rawDescription}]`,
+						);
+					} else if (file.file_type.startsWith("audio/")) {
+						promptChunkLines.push(
+							`[Audio: "${file.file_name}"] [Description: ${rawDescription}]`,
+						);
+					} else if (file.file_type.startsWith("video/")) {
+						promptChunkLines.push(
+							`[Video: "${file.file_name}"] [Description: ${rawDescription}]`,
+						);
+					}
 
-					// Store the formatted description
-					await supabaseClient
-						.from("files")
-						.update({ description: formattedDescription })
-						.eq("id", file.id);
+					// Format for embedding - use full formatted description
+					chunkLines.push(file.description);
 				}
 			}
 		}
@@ -704,8 +739,8 @@ async function embedLatestChainMessage(
 
 		for (const msg of snippetMsgs) {
 			const channelInfo = msg.channelName
-				? `in ${msg.channelName} channel`
-				: `to ${msg.recipientName}`;
+				? `${msg.channelName} channel`
+				: "a direct message";
 			const timestamp = formatTimestamp(msg.timestamp, true);
 			const messageDate = msg.timestamp;
 			const formattedDate = messageDate.toLocaleDateString("en-GB", {
@@ -726,7 +761,7 @@ async function embedLatestChainMessage(
 				`[${msg.sender.displayName}, ${formatTimestamp(msg.timestamp, false)}]: ${msg.content}`,
 			);
 			chunkLines.push(
-				`[${msg.sender.displayName} said ${channelInfo} on ${timestamp}]: ${msg.content}`,
+				`[${msg.sender.displayName} said in ${channelInfo} on ${timestamp}]: ${msg.content}`,
 			);
 
 			// Get files for this message from the database
@@ -734,20 +769,28 @@ async function embedLatestChainMessage(
 				// For current message, use the files we already have
 				if (originalMessage.files?.length > 0) {
 					for (const file of originalMessage.files) {
-						if (file.caption) {
-							// Format for the prompt
-							promptChunkLines.push(
-								`[Image: ${file.file_name}] [Caption: ${file.caption}]`,
-							);
-							// Format for embedding
-							const formattedDescription = `${msg.sender.displayName} shared ${file.file_name} in ${channelInfo} on ${timestamp}. Image description: ${file.caption}`;
-							chunkLines.push(formattedDescription);
+						if (file.description) {
+							// Format for the prompt - use raw description
+							const rawDescription =
+								file.description
+									?.replace(/^\[.*?\. (Image|Audio|Video) description: /, "")
+									.replace(/\]$/, "") || "";
+							if (file.file_type.startsWith("image/")) {
+								promptChunkLines.push(
+									`[Image: "${file.file_name}"] [Description: ${rawDescription}]`,
+								);
+							} else if (file.file_type.startsWith("audio/")) {
+								promptChunkLines.push(
+									`[Audio: "${file.file_name}"] [Description: ${rawDescription}]`,
+								);
+							} else if (file.file_type.startsWith("video/")) {
+								promptChunkLines.push(
+									`[Video: "${file.file_name}"] [Description: ${rawDescription}]`,
+								);
+							}
 
-							// Store the formatted description
-							await supabaseClient
-								.from("files")
-								.update({ description: formattedDescription })
-								.eq("id", file.id);
+							// Format for embedding - use full formatted description
+							chunkLines.push(file.description);
 						}
 					}
 				}
@@ -759,7 +802,8 @@ async function embedLatestChainMessage(
 						files (
 							id,
 							file_name,
-							caption
+							file_type,
+							description
 						)
 					`)
 					.eq("id", msg.id)
@@ -767,20 +811,28 @@ async function embedLatestChainMessage(
 
 				if (chainMessage?.files && Array.isArray(chainMessage.files)) {
 					for (const file of chainMessage.files) {
-						if (file.caption) {
-							// Format for the prompt
-							promptChunkLines.push(
-								`[Image: ${file.file_name}] [Caption: ${file.caption}]`,
-							);
-							// Format for embedding
-							const formattedDescription = `${msg.sender.displayName} shared ${file.file_name} in ${channelInfo} on ${timestamp}. Image description: ${file.caption}`;
-							chunkLines.push(formattedDescription);
+						if (file.description) {
+							// Format for the prompt - use raw description
+							const rawDescription =
+								file.description
+									?.replace(/^\[.*?\. (Image|Audio|Video) description: /, "")
+									.replace(/\]$/, "") || "";
+							if (file.file_type.startsWith("image/")) {
+								promptChunkLines.push(
+									`[Image: "${file.file_name}"] [Description: ${rawDescription}]`,
+								);
+							} else if (file.file_type.startsWith("audio/")) {
+								promptChunkLines.push(
+									`[Audio: "${file.file_name}"] [Description: ${rawDescription}]`,
+								);
+							} else if (file.file_type.startsWith("video/")) {
+								promptChunkLines.push(
+									`[Video: "${file.file_name}"] [Description: ${rawDescription}]`,
+								);
+							}
 
-							// Store the formatted description
-							await supabaseClient
-								.from("files")
-								.update({ description: formattedDescription })
-								.eq("id", file.id);
+							// Format for embedding - use full formatted description
+							chunkLines.push(file.description);
 						}
 					}
 				}
@@ -913,7 +965,7 @@ export async function createMessage({
 				console.error("[createMessage] Error in delayed embedding:", error);
 			}
 		},
-		0.3 * 60 * 1000,
+		0.8 * 60 * 1000,
 	); // or your desired delay
 
 	// Update conversation's last_message_at if it's a DM
